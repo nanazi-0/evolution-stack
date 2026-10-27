@@ -32,12 +32,27 @@ CANDIDATE_DIR = Path(os.environ.get(
 CASES_FILE = Path(os.environ.get("EVOLUTION_CASES", EVAL_DIR / "cases" / "smoke.json"))
 
 
+ENGINE = os.environ.get("EVOLUTION_ENGINE", "echo").lower()
+DSH_VERSION = os.environ.get("EVOLUTION_DSH_VERSION", "0.2.1-rc.3")
+DSH_PROFILE = os.environ.get("EVOLUTION_DSH_PROFILE", "headless")
+DSH_TIMEOUT = int(os.environ.get("EVOLUTION_DSH_TIMEOUT", "240"))
+
+
 def run_evaluation() -> dict:
     """调用执行器适配器拿一份真实信封（ADR-006：只有 DSH 或离线引擎，禁止外部 substrate）。"""
     if str(EVAL_DIR) not in sys.path:
         sys.path.insert(0, str(EVAL_DIR))
-    from runner import EchoEngine, run_eval  # 延迟导入，避免无关工具启动变慢
-    return run_eval(CANDIDATE_DIR, CASES_FILE, EchoEngine(), 60)
+    if ENGINE == "dsh":
+        from runner import DshEngine, run_eval
+        extra = []
+        patch = os.environ.get("EVOLUTION_PATCH")
+        if patch:
+            extra = ["--patch", patch]
+        engine = DshEngine(DSH_VERSION, DSH_PROFILE, extra_args=extra)
+    else:
+        from runner import EchoEngine, run_eval
+        engine = EchoEngine()
+    return run_eval(CANDIDATE_DIR, CASES_FILE, engine, DSH_TIMEOUT)
 
 LEVELS = {  # ADR-005 预算分级
     "l1": {"candidates": 1, "tasks": 5, "gates": 3},

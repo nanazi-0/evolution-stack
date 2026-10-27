@@ -76,9 +76,15 @@ class DshEngine:
         env = dict(os.environ)
         env.setdefault("PYTHONIOENCODING", "utf-8")
         try:
-            proc = subprocess.run(cmd, cwd=str(candidate), capture_output=True,
-                                  text=True, encoding="utf-8", errors="replace",
-                                  timeout=timeout, env=env, shell=(os.name == "nt"))
+            # Windows 上 npx 是 .cmd，必须经 cmd.exe 解析；list2cmdline 负责正确加引号
+            if os.name == "nt":
+                proc = subprocess.run(subprocess.list2cmdline(cmd), cwd=str(candidate),
+                                      capture_output=True, text=True, encoding="utf-8",
+                                      errors="replace", timeout=timeout, env=env, shell=True)
+            else:
+                proc = subprocess.run(cmd, cwd=str(candidate), capture_output=True,
+                                      text=True, encoding="utf-8", errors="replace",
+                                      timeout=timeout, env=env)
         except subprocess.TimeoutExpired:
             return RunResult("", time.time() - t0, self.name, error="timeout")
         except FileNotFoundError as exc:

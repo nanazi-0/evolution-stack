@@ -130,3 +130,25 @@ DSH 沙箱只允许子进程写 `D:\start\ds-harness\work`。`evolution-stack` �
 4. 最后才把 **Harness² 的 PPC** 接成 proposer（只借算法，禁用其 Codex substrate）。
 
 顺序不能反：**先有真值，再谈进化**。否则会拿占位分数训练出占位经验，写进记忆后再也清不掉。
+
+### 真引擎的运行前提（实测）
+
+`npx @deepseek-ai/dsh --profile headless` 能用，但有两个坑：
+
+1. **桌面端的账号登录不能跨进程复用**
+   直接跑会报 `ACCOUNT_SIGN_IN_REQUIRED: The request destination must allow account authentication`。
+   桌面端用的是 `deepseek-account`（账号授权），headless 进程拿不到。
+2. **默认路由需要 `DEEPSEEK_API_KEY`**
+   否则报 `MISSING_CREDENTIAL: llm-deepseek: no API key for provider route "deepseek-official"`。
+
+所以切真引擎需要一条 API key：
+
+```powershell
+$env:DEEPSEEK_API_KEY = 'sk-...'
+$env:EVOLUTION_ENGINE = 'dsh'
+```
+
+若用其他兼容端点，再配 `EVOLUTION_PATCH` 指向一份改了 provider 的 patch 文件
+（参考 `control/eval/headless-model.patch.yml`）。
+
+`EVOLUTION_ENGINE=echo` 时不消耗任何模型额度，适合验证管道。

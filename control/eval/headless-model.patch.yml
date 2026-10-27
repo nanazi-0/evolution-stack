@@ -1,0 +1,8 @@
+# 让 headless profile 复用桌面端已登录的 deepseek-account 路由，
+# 这样评测不需要单独的 DEEPSEEK_API_KEY。
+- id: agent-default-model
+  name: "@deepseek-ai/dsh-agent-default-model"
+  config:
+    provider: deepseek-account
+    model: deepseek-flash
+    reasoningEffort: high
