@@ -46,15 +46,16 @@ def _post(url: str, payload: dict, timeout: int = 30) -> tuple[int, dict]:
         return 0, {"error": f"{type(exc).__name__}: {exc}"}
 
 
-def remember(run_id: str, summary: str, meta: dict | None = None) -> dict:
+def remember(project: str, run_id: str, summary: str, meta: dict | None = None) -> dict:
     backend = _backend()
-    record = {"run_id": run_id, "summary": summary, "meta": meta or {},
-              "at": int(time.time())}
+    record = {"project": project, "run_id": run_id, "summary": summary,
+              "meta": meta or {}, "at": int(time.time())}
+
     if backend == "openviking":
         status, body = _post(f"{OV_URL}/api/v1/resources", {
-            "uri": f"viking://user/memories/evolution/{run_id}",
+            "uri": f"viking://user/memories/evolution/{project}/{run_id}",
             "content": summary,
-            "metadata": {"run_id": run_id, **(meta or {})},
+            "metadata": {"run_id": run_id, "project": project, **(meta or {})},
         })
         return {"backend": "openviking", "ok": 200 <= status < 300,
                 "status": status, "detail": body if status >= 300 else "written"}
@@ -64,18 +65,18 @@ def remember(run_id: str, summary: str, meta: dict | None = None) -> dict:
     return {"backend": "local", "ok": True, "file": str(LOCAL_FILE)}
 
 
-def recall(query: str, top_k: int = 5) -> dict:
+def recall(project: str, query: str, top_k: int = 5) -> dict:
     backend = _backend()
     if backend == "openviking":
         status, body = _post(f"{OV_URL}/api/v1/search/search", {
-            "query": query, "top_k": top_k,
+            "query": query, "top_k": top_k, "project": project,
         })
         hits = body.get("results") or body.get("items") or [] if isinstance(body, dict) else []
         return {"backend": "openviking", "ok": 200 <= status < 300,
                 "status": status, "hits": hits[:top_k],
                 "detail": None if status < 300 else body.get("error", "")}
     if not LOCAL_FILE.exists():
-        return {"backend": "local", "ok": True, "hits": [], "note": "记忆库为空"}
+        return {"backend": "local", "ok": True, "hits": [], "note": "记忆库为空", "project": project}
     rows = []
     for line in LOCAL_FILE.read_text(encoding="utf-8").splitlines():
         line = line.strip()
@@ -85,9 +86,10 @@ def recall(query: str, top_k: int = 5) -> dict:
             rows.append(json.loads(line))
         except Exception:  # noqa: BLE001
             continue
-    # 朴素子串匹配；够用且可解释，不做语义检索
+    # 先按项目过滤，再做朴素子串匹配；够用且可解释，不做语义检索
+    rows = [r for r in rows if r.get("project", "default") == project]
     q = query.lower()
     hits = [r for r in rows if q in (r.get("summary", "") + json.dumps(r.get("meta", {}), ensure_ascii=False)).lower()]
     if not hits:
         hits = rows[-top_k:]
-    return {"backend": "local", "ok": True, "hits": hits[-top_k:], "total": len(rows)}
+    return {"backend": "local", "ok": True, "hits": hits[-top_k:], "total": len(rows), "project": project}

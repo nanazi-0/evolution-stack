@@ -94,7 +94,7 @@ git -C local\agent-evolution-platform push -u github main
 | ADR-002 具名批准 | ✅ 生效：缺 actor/reason 拒绝；门禁失败拒绝；缺测门禁需显式确认 |
 | ADR-004 记忆只收 approved | ✅ 生效：未批准的 run 写记忆会被拒 |
 | SHA-256 审计链 | ✅ 生效：`audit_verify` 可校验 |
-| 十道门禁 | ✅ 已接 agent-quality-security：unit-tests 与 business-outcome 真跑，其余 8 道如实标 unavailable |
+| 十道门禁 | ✅ **10/10 全通过**（真 pipeline + 证据哈希，见 gate-report.json）|
 | 候选生成（PPC） | ⚠️ 占位：`evolve_run` 只建 run 记录 |
 | 记忆读写 | ✅ 已接适配器：local 后端可用；`MEMORY_BACKEND=openviking` + `OPENVIKING_URL` 即切真服务 |
 | DSH 执行器适配器 | ✅ 已实现 `control/eval/runner.py`：断言驱动打分，echo 引擎可直接跑 |
@@ -213,3 +213,46 @@ configs/demo.toml / llm-example.toml
 
 另：沙箱下系统 Temp 不可写，所有子进程都注入 `TMP/TEMP=work/_tmp`，否则 `tempfile` 会报
 "No usable temporary directory found"。
+### 十道门禁全部跑通（2026-10-27 实测）
+
+```
+[PASS] unit-tests            [PASS] web-ui-accessibility
+[PASS] business-outcome      [PASS] performance
+[PASS] telemetry             [PASS] source-security
+[PASS] phoenix-trace-ingest  [PASS] dependency-secret
+[PASS] agent-security        [PASS] web-dynamic-security
+QUALITY_GATE=PASS
+```
+
+关键前提（每条都是踩出来的）：
+
+1. **必须用系统 Python `D:\cpython3.14\python.exe`**。工作区 venv 的 python.exe 带沙箱能力标记，
+   从它启动的进程开不了 docker 命名管道、也写不了项目目录（`PermissionError`）。
+2. 子进程注入 `TMP/TEMP=work/_tmp`，否则 tempfile 报"No usable temporary directory"。
+3. `PYTHONPATH=<quality-security>/src`，因为 `scripts/*` 直接 import `agent_quality`。
+4. Playwright 需要 `chromium-headless-shell`（不只是 chromium），且 CDN 在国内拉不动，
+   用 `PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright`。
+5. Phoenix 走 `PHOENIX_HOST`，浏览器走 `PLAYWRIGHT_BROWSERS_PATH`。
+
+**不要再用目录联接重定向 `reports/data/.runtime`** —— 容器内看到联接会报 `ENOTDIR`。
+
+### 项目隔离（2026-10-27）
+
+记忆、运行状态、候选目录现在都带 `project` 维度：
+
+| 项 | 隔离方式 |
+|---|---|
+| 记忆 | 每条记录带 `project`；recall 先按项目过滤；OpenViking URI 为 `viking://user/memories/evolution/<project>/<run_id>` |
+| 运行状态 | run 带 `project`；`latest` 只在同项目内取 |
+| 候选目录 | `targets/<project>/baseline`，不存在时回退到默认基线 |
+
+调用侧：`evolve_run(project="alpha", ...)`、`memory_recall(project="alpha", ...)`。
+测试里验证过：alpha 写的记忆，beta 查不到。
+
+### 与 Docker Desktop 共享的边界
+
+* 镜像按 digest 钉死，与其他项目**共享同一份层**，不重复占盘、不冲突。
+* 容器都是 `docker run --rm`，无 `--name`、无 `-p`，不会和别的项目撞名撞端口。
+* **唯一需要协调的是长期服务容器**：`observability-phoenix-1` 固定占用 4317/6006。
+  如果 Portfolio 也要起 Phoenix，两边会抢端口。到时候用独立 compose 项目名 + 改端口：
+  `docker compose -p evolution-stack up -d`，并用 `PHOENIX_HOST` 指到新端口。

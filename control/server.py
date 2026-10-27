@@ -26,6 +26,10 @@ STATE_DIR = Path(os.environ.get("EVOLUTION_STATE_DIR", r"D:\start\ds-harness\wor
 STATE_FILE = STATE_DIR / "state.json"
 
 EVAL_DIR = ROOT / "eval"
+PROJECT_DEFAULT = os.environ.get("EVOLUTION_PROJECT", "default")
+CANDIDATES_ROOT = Path(os.environ.get(
+    "EVOLUTION_CANDIDATES_ROOT",
+    str(STACK_ROOT / "local" / "agent-evolution-platform" / "targets")))
 CANDIDATE_DIR = Path(os.environ.get(
     "EVOLUTION_CANDIDATE",
     STACK_ROOT / "local" / "agent-evolution-platform" / "targets" / "demo-agent" / "baseline"))
@@ -38,7 +42,19 @@ DSH_PROFILE = os.environ.get("EVOLUTION_DSH_PROFILE", "headless")
 DSH_TIMEOUT = int(os.environ.get("EVOLUTION_DSH_TIMEOUT", "240"))
 
 
-def run_evaluation(engine_name: str | None = None) -> dict:
+def candidate_for(project: str) -> Path:
+    """每个项目一个候选目录；不存在则回退到默认基线。"""
+    cand = CANDIDATES_ROOT / project / "baseline"
+    return cand if cand.is_dir() else CANDIDATE_DIR
+
+
+def latest_run(state: dict, project: str | None = None):
+    """只在指定项目内取最新 run，避免跨项目误批。"""
+    runs = [r for r in state["runs"] if project is None or r.get("project", "default") == project]
+    return runs[-1] if runs else None
+
+
+def run_evaluation(engine_name: str | None = None, candidate: Path | None = None) -> dict:
     """调用执行器适配器拿一份信封（ADR-006：只有 DSH 或离线引擎，禁止外部 substrate）。
 
     engine_name: "echo"（默认，秒回零成本）或 "dsh"（真模型，每条用例约 1-2 分钟）。
@@ -60,7 +76,7 @@ def run_evaluation(engine_name: str | None = None) -> dict:
         engine = EchoEngine()
     else:
         raise ValueError(f"未知引擎 {name}，只允许 echo / dsh")
-    return run_eval(CANDIDATE_DIR, CASES_FILE, engine, DSH_TIMEOUT)
+    return run_eval(candidate or CANDIDATE_DIR, CASES_FILE, engine, DSH_TIMEOUT)
 
 LEVELS = {  # ADR-005 预算分级
     "l1": {"candidates": 1, "tasks": 5, "gates": 3},
@@ -123,11 +139,12 @@ def t_evolve_run(args: dict) -> dict:
 
     state = _load()
     run_id = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + uuid.uuid4().hex[:6]
+    project = str(args.get("project") or PROJECT_DEFAULT)
     engine_name = str(args.get("engine", "echo")).lower()
     if engine_name not in ("echo", "dsh"):
         return {"error": f"未知引擎 {engine_name}，只允许 echo / dsh"}
     try:
-        evaluation = run_evaluation(engine_name)
+        evaluation = run_evaluation(engine_name, candidate_for(project))
     except Exception as exc:                      # 评估失败不能静默变通过
         evaluation = {"passed": False, "score": 0.0, "metrics": {},
                       "failures": [{"id": "evaluator-error", "detail": f"{type(exc).__name__}: {exc}"}]}
@@ -135,6 +152,7 @@ def t_evolve_run(args: dict) -> dict:
         "run_id": run_id,
         "level": level,
         "objective": str(args.get("objective", "")),
+        "project": project,
         "budget": budget,
         "max_generations": requested,
         "status": "eligible",           # ADR-002：对比式/断言式只能产 eligible
@@ -149,19 +167,20 @@ def t_evolve_run(args: dict) -> dict:
     _audit(state, "evolve.run", {"run_id": run_id, "level": level, "engine": engine_name,
                                  "score": evaluation.get("score"), "passed": evaluation.get("passed")})
     _save(state)
-    return {"run_id": run_id, "status": run["status"], "budget": budget, "engine": engine_name,
+    return {"run_id": run_id, "project": project, "status": run["status"], "budget": budget, "engine": engine_name,
             "evaluation": {k: evaluation.get(k) for k in ("passed", "score", "metrics", "failures")},
             "next": "用 gate_status 看门禁与评估；approve_release 才能晋升"}
 
 
 def t_evolve_status(args: dict) -> dict:
     state = _load()
+    project = str(args.get("project") or PROJECT_DEFAULT)
     run = _find(state, str(args.get("run_id", "latest")))
-    if run is None and args.get("run_id", "latest") == "latest" and state["runs"]:
-        run = state["runs"][-1]
+    if run is None and args.get("run_id", "latest") == "latest":
+        run = latest_run(state, project)
     if run is None:
-        return {"error": "没有找到 run"}
-    return {k: run[k] for k in ("run_id", "level", "status", "objective", "created_at")}
+        return {"error": f"项目 {project} 下没有找到 run"}
+    return {k: run[k] for k in ("run_id", "project", "level", "status", "objective", "created_at")}
 
 
 QS_ROOT = Path(os.environ.get(
@@ -181,7 +200,7 @@ def collect_gates(heavy: bool = False) -> tuple[list[dict], dict]:
 
 def t_gate_status(args: dict) -> dict:
     state = _load()
-    run = _find(state, str(args.get("run_id", ""))) or (state["runs"][-1] if state["runs"] else None)
+    run = _find(state, str(args.get("run_id", ""))) or latest_run(state, str(args.get("project") or PROJECT_DEFAULT))
     if run is None:
         return {"error": "没有找到 run"}
     try:
@@ -204,7 +223,7 @@ def t_approve(args: dict) -> dict:
     if not actor or not reason:
         return {"error": "ADR-002：批准必须给出具名 actor 和 reason，不允许匿名自动化"}
     state = _load()
-    run = _find(state, str(args.get("run_id", ""))) or (state["runs"][-1] if state["runs"] else None)
+    run = _find(state, str(args.get("run_id", ""))) or latest_run(state, str(args.get("project") or PROJECT_DEFAULT))
     if run is None:
         return {"error": "没有找到 run"}
 
@@ -238,7 +257,7 @@ def t_approve(args: dict) -> dict:
 def t_rollback(args: dict) -> dict:
     actor = str(args.get("actor", "")).strip() or "unknown"
     state = _load()
-    run = state["runs"][-1] if state["runs"] else None
+    run = latest_run(state, str(args.get("project") or PROJECT_DEFAULT))
     if run is None:
         return {"error": "没有可回滚的 run"}
     run["status"] = "rolled_back"
@@ -268,14 +287,15 @@ def _memory():
 
 def t_memory_recall(args: dict) -> dict:
     mem = _memory()
-    out = mem.recall(str(args.get("query", "")), int(args.get("top_k", 5)))
+    project = str(args.get("project") or PROJECT_DEFAULT)
+    out = mem.recall(project, str(args.get("query", "")), int(args.get("top_k", 5)))
     out["query"] = args.get("query", "")
     return out
 
 
 def t_memory_commit(args: dict) -> dict:
     state = _load()
-    run = _find(state, str(args.get("run_id", ""))) or (state["runs"][-1] if state["runs"] else None)
+    run = _find(state, str(args.get("run_id", ""))) or latest_run(state, str(args.get("project") or PROJECT_DEFAULT))
     if run is None:
         return {"error": "没有找到 run"}
     if run["status"] != "approved":   # ADR-004 硬规则
@@ -284,7 +304,8 @@ def t_memory_commit(args: dict) -> dict:
     ev = run.get("evaluation") or {}
     summary = (f"run={run['run_id']} level={run['level']} engine={run.get('engine')} "
                f"score={ev.get('score')} passed={ev.get('passed')} objective={run.get('objective','')}")
-    res = mem.remember(run["run_id"], summary, {"level": run["level"], "engine": run.get("engine")})
+    res = mem.remember(run.get("project", PROJECT_DEFAULT), run["run_id"], summary,
+                       {"level": run["level"], "engine": run.get("engine")})
     state["memory"].append({"run_id": run["run_id"], "at": int(time.time()),
                             "backend": res.get("backend"), "ok": res.get("ok")})
     _audit(state, "memory.commit", {"run_id": run["run_id"], "backend": res.get("backend")})
@@ -295,10 +316,11 @@ def t_memory_commit(args: dict) -> dict:
 TOOLS = [
     ("evolve_run", "跑一代进化。参数 level(l1/l2/l3)、objective、max_generations、engine(echo 秒回不花钱 / dsh 真模型约 4 分钟)", t_evolve_run,
      {"type": "object", "properties": {"level": {"type": "string"}, "objective": {"type": "string"},
+                                       "project": {"type": "string"},
                                        "max_generations": {"type": "integer"},
                                        "engine": {"type": "string", "enum": ["echo", "dsh"]}}}),
-    ("evolve_status", "查看某个 run 的状态", t_evolve_status,
-     {"type": "object", "properties": {"run_id": {"type": "string"}}}),
+    ("evolve_status", "查看某个 run 的状态（按项目隔离）", t_evolve_status,
+     {"type": "object", "properties": {"run_id": {"type": "string"}, "project": {"type": "string"}}}),
     ("gate_status", "查看十道门禁的逐项结果与证据", t_gate_status,
      {"type": "object", "properties": {"run_id": {"type": "string"}}}),
     ("approve_release", "具名批准晋升（必须给 actor 和 reason）", t_approve,
@@ -307,8 +329,8 @@ TOOLS = [
     ("rollback_release", "回滚到上一 approved", t_rollback,
      {"type": "object", "properties": {"actor": {"type": "string"}, "reason": {"type": "string"}}}),
     ("audit_verify", "校验 SHA-256 审计链", t_audit_verify, {"type": "object", "properties": {}}),
-    ("memory_recall", "查 OpenViking 历史经验", t_memory_recall,
-     {"type": "object", "properties": {"query": {"type": "string"}, "top_k": {"type": "integer"}}}),
+    ("memory_recall", "按项目查历史经验", t_memory_recall,
+     {"type": "object", "properties": {"query": {"type": "string"}, "project": {"type": "string"}, "top_k": {"type": "integer"}}}),
     ("memory_commit", "把已批准的 run 写入记忆（未批准会被拒绝）", t_memory_commit,
      {"type": "object", "properties": {"run_id": {"type": "string"}}}),
 ]
