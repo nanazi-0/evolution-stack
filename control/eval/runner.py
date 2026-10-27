@@ -75,6 +75,9 @@ class DshEngine:
                "--profile", self.profile, prompt] + self.extra
         env = dict(os.environ)
         env.setdefault("PYTHONIOENCODING", "utf-8")
+        # 评测用独立 DSH_HOME：子进程只有工作区写权限，且不该碰生产 profile
+        env["DSH_HOME"] = os.environ.get("EVOLUTION_DSH_HOME", r"D:\start\ds-harness\work\_eval-home")
+        Path(env["DSH_HOME"]).mkdir(parents=True, exist_ok=True)
         try:
             # Windows 上 npx 是 .cmd，必须经 cmd.exe 解析；list2cmdline 负责正确加引号
             if os.name == "nt":
