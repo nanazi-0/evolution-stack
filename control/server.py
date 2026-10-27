@@ -25,6 +25,20 @@ STACK_ROOT = ROOT.parent
 STATE_DIR = Path(os.environ.get("EVOLUTION_STATE_DIR", r"D:\start\ds-harness\work\evolution-state"))
 STATE_FILE = STATE_DIR / "state.json"
 
+EVAL_DIR = ROOT / "eval"
+CANDIDATE_DIR = Path(os.environ.get(
+    "EVOLUTION_CANDIDATE",
+    STACK_ROOT / "local" / "agent-evolution-platform" / "targets" / "demo-agent" / "baseline"))
+CASES_FILE = Path(os.environ.get("EVOLUTION_CASES", EVAL_DIR / "cases" / "smoke.json"))
+
+
+def run_evaluation() -> dict:
+    """调用执行器适配器拿一份真实信封（ADR-006：只有 DSH 或离线引擎，禁止外部 substrate）。"""
+    if str(EVAL_DIR) not in sys.path:
+        sys.path.insert(0, str(EVAL_DIR))
+    from runner import EchoEngine, run_eval  # 延迟导入，避免无关工具启动变慢
+    return run_eval(CANDIDATE_DIR, CASES_FILE, EchoEngine(), 60)
+
 LEVELS = {  # ADR-005 预算分级
     "l1": {"candidates": 1, "tasks": 5, "gates": 3},
     "l2": {"candidates": 2, "tasks": 10, "gates": 6},
@@ -86,24 +100,31 @@ def t_evolve_run(args: dict) -> dict:
 
     state = _load()
     run_id = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + uuid.uuid4().hex[:6]
+    try:
+        evaluation = run_evaluation()
+    except Exception as exc:                      # 评估失败不能静默变通过
+        evaluation = {"passed": False, "score": 0.0, "metrics": {},
+                      "failures": [{"id": "evaluator-error", "detail": f"{type(exc).__name__}: {exc}"}]}
     run = {
         "run_id": run_id,
         "level": level,
         "objective": str(args.get("objective", "")),
         "budget": budget,
         "max_generations": requested,
-        "status": "eligible",           # ADR-002：对比式只能产 eligible
+        "status": "eligible",           # ADR-002：对比式/断言式只能产 eligible
         "created_at": int(time.time()),
         "candidates": [],
         "gates": [],
+        "evaluation": evaluation,       # 真实信封（执行器适配器产出）
         "approved": None,
-        "note": "骨架：候选与门禁为占位，真实接线见 adapters/",
     }
     state["runs"].append(run)
-    _audit(state, "evolve.run", {"run_id": run_id, "level": level})
+    _audit(state, "evolve.run", {"run_id": run_id, "level": level,
+                                 "score": evaluation.get("score"), "passed": evaluation.get("passed")})
     _save(state)
     return {"run_id": run_id, "status": run["status"], "budget": budget,
-            "next": "用 gate_status 看门禁；approve_release 才能晋升"}
+            "evaluation": {k: evaluation.get(k) for k in ("passed", "score", "metrics")},
+            "next": "用 gate_status 看门禁与评估；approve_release 才能晋升"}
 
 
 def t_evolve_status(args: dict) -> dict:
@@ -122,10 +143,12 @@ def t_gate_status(args: dict) -> dict:
     if run is None:
         return {"error": "没有找到 run"}
     gates = [{"id": g, "passed": False, "skipped": True,
-              "detail": "骨架：未接 agent-quality-security"} for g in GATES]
+              "detail": "未接 agent-quality-security（规则层就绪，执行未接）"} for g in GATES]
+    evaluation = run.get("evaluation")
     return {"run_id": run["run_id"], "status": run["status"],
+            "evaluation": evaluation,
             "gates": gates, "passed": 0, "total": len(gates),
-            "note": "ADR-002：这些门禁全部通过 + 具名批准，才能 approved"}
+            "note": "evaluation 来自执行器适配器（真实断言）；gates 仍需接 agent-quality-security"}
 
 
 def t_approve(args: dict) -> dict:

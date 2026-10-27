@@ -94,10 +94,10 @@ git -C local\agent-evolution-platform push -u github main
 | ADR-002 具名批准 | ✅ 生效：缺 actor/reason 直接拒绝 |
 | ADR-004 记忆只收 approved | ✅ 生效：未批准的 run 写记忆会被拒 |
 | SHA-256 审计链 | ✅ 生效：`audit_verify` 可校验 |
-| 十道门禁 | ⚠️ 占位：返回 10 项，全部 skipped |
+| 十道门禁 | ⚠️ 占位：返回 10 项，全部 skipped（等接 agent-quality-security）|
 | 候选生成（PPC） | ⚠️ 占位：`evolve_run` 只建 run 记录 |
 | OpenViking 读写 | ⚠️ 占位：`memory_recall` 返回空 |
-| DSH 执行器适配器 | ❌ 未写（ADR-006 的唯一允许执行器） |
+| DSH 执行器适配器 | ✅ 已实现 `control/eval/runner.py`：断言驱动打分，echo 引擎可直接跑 |
 
 **当前状态 = 治理骨架可跑，真实子系统未接线。** 这不是"完成品"，但所有安全规则已经在代码里，接功能不会绕过它们。
 
@@ -124,7 +124,7 @@ DSH 沙箱只允许子进程写 `D:\start\ds-harness\work`。`evolution-stack` �
 
 ## 下一步
 
-1. 写 **DSH 执行器适配器**（`control/eval/runner.py`）：调 `dsh --profile headless` 跑候选，输出评估信封。
+1. ~~写 DSH 执行器适配器~~ ✅ 已完成（`control/eval/runner.py`）；下一步是把它从 echo 引擎切到真 DSH。
 2. 接 **agent-quality-security**：把十道门禁的真实结果灌进 `gate_status`。
 3. 接 **OpenViking**：`memory_recall` / `memory_commit` 走它的 HTTP API。
 4. 最后才把 **Harness² 的 PPC** 接成 proposer（只借算法，禁用其 Codex substrate）。
