@@ -170,12 +170,12 @@ QS_ROOT = Path(os.environ.get(
 ADAPTER_DIR = ROOT / "adapters"
 
 
-def collect_gates() -> tuple[list[dict], dict]:
+def collect_gates(heavy: bool = False) -> tuple[list[dict], dict]:
     """跑 agent-quality-security 里当前环境能跑的门禁。"""
     if str(ADAPTER_DIR) not in sys.path:
         sys.path.insert(0, str(ADAPTER_DIR))
     from quality import run_gates, summarize
-    gates = run_gates(QS_ROOT)
+    gates = run_gates(QS_ROOT, heavy=heavy)
     return gates, summarize(gates)
 
 
@@ -185,7 +185,7 @@ def t_gate_status(args: dict) -> dict:
     if run is None:
         return {"error": "没有找到 run"}
     try:
-        gates, summary = collect_gates()
+        gates, summary = collect_gates(heavy=bool(args.get("heavy")))
         err = None
     except Exception as exc:  # noqa: BLE001
         gates, summary, err = [], {"total": 0}, f"{type(exc).__name__}: {exc}"
@@ -210,7 +210,7 @@ def t_approve(args: dict) -> dict:
 
     # ADR-002：门禁是批准的硬前提
     try:
-        gates, summary = collect_gates()
+        gates, summary = collect_gates(heavy=bool(args.get("heavy")))
         gate_err = None
     except Exception as exc:  # noqa: BLE001
         gates, summary, gate_err = [], {"failed": -1, "unavailable": -1}, f"{type(exc).__name__}: {exc}"

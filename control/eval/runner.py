@@ -103,6 +103,10 @@ class DshEngine:
                "--profile", self.profile, prompt] + self.extra
         env = dict(os.environ)
         env.setdefault("PYTHONIOENCODING", "utf-8")
+        # 沙箱下系统 Temp 不可写；子进程的 tempfile 需要可写目录
+        _tmp = os.environ.get("EVOLUTION_TMP", r"D:\start\ds-harness\work\_tmp")
+        os.makedirs(_tmp, exist_ok=True)
+        env["TMP"] = env["TEMP"] = _tmp
         # 评测用独立 DSH_HOME：子进程只有工作区写权限，且不该碰生产 profile
         env["DSH_HOME"] = os.environ.get("EVOLUTION_DSH_HOME", r"D:\start\ds-harness\work\_eval-home")
         Path(env["DSH_HOME"]).mkdir(parents=True, exist_ok=True)

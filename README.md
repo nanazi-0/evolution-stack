@@ -192,3 +192,24 @@ runner 会把 `DSH_HOME` 指向 `work/_eval-home`，原因有两条：
 
 local 后端写 `work/evolution-state/memory.jsonl`，一行一条，可直接 grep。
 召回是朴素子串匹配——够用、可解释，但不是语义检索；要语义就切 OpenViking。
+### 与 D:\Portfolio 的隔离（2026-10-27 核实）
+
+结论：**不会污染**。依据：
+
+1. `D:\Portfolio` 下今天没有任何文件被修改；
+2. `evolution-stack` 里四个目录联接全部指向 `work/_qs-store`，没有指向 Portfolio；
+3. 项目输出目录（`.runtime` `reports` `data` `test-results`）都在工作区。
+
+但发现过一处遗留指向并已修复：
+
+```
+configs/demo.toml / llm-example.toml
+  root = "D:/Portfolio/agent-quality-security"   ← 会让 evolutionctl 在 Portfolio 里跑并写 reports/data
+改成
+  root = "D:/start/ds-harness/evolution-stack/local/agent-quality-security"
+```
+
+同时给 `quality.py` 加了 venv 缺失时回退到当前解释器的逻辑（复制时排除了 `.venv`）。
+
+另：沙箱下系统 Temp 不可写，所有子进程都注入 `TMP/TEMP=work/_tmp`，否则 `tempfile` 会报
+"No usable temporary directory found"。

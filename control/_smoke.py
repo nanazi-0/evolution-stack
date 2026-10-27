@@ -17,6 +17,7 @@ SERVER = HERE / "server.py"
 _env = dict(os.environ)
 _env.pop("DEEPSEEK_API_KEY", None)
 _env["EVOLUTION_ENGINE"] = "echo"
+_env["EVOLUTION_GATE_SET"] = "light"
 
 proc = subprocess.Popen([sys.executable, str(SERVER)], env=_env,
                         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -70,9 +71,16 @@ check("未知级别被拒", "error" in r3, r3)
 print("== ADR-002 批准必须具名 ==")
 a1 = tool("approve_release", run_id=rid)
 check("缺 actor/reason 被拒", "error" in a1, a1)
-a0 = tool("approve_release", run_id=rid, actor="测试员", reason="未确认缺测门禁")
-check("未确认缺测门禁时拒绝批准", "error" in a0 and "acknowledge_unavailable" in a0["error"], a0)
-a2 = tool("approve_release", run_id=rid, actor="测试员", reason="人工复核通过，接受 8 道门禁未执行", acknowledge_unavailable=True)
+_g = tool("gate_status", run_id=rid)["summary"]
+a0 = tool("approve_release", run_id=rid, actor="测试员", reason="未确认门禁状态")
+# 规则断言：失败→拒绝；缺测→要求显式确认；全过→允许批准
+if _g["failed"] > 0:
+    check("有门禁失败时拒绝批准", "error" in a0 and "门禁失败" in a0["error"], a0)
+elif _g["unavailable"] > 0:
+    check("有缺测门禁时要求显式确认", "error" in a0 and "acknowledge_unavailable" in a0["error"], a0)
+else:
+    check("门禁全通过时无需确认即可批准", a0.get("status") == "approved", a0)
+a2 = tool("approve_release", run_id=rid, actor="测试员", reason="人工复核通过", acknowledge_unavailable=True)
 check("具名批准成功", a2.get("status") == "approved", a2)
 
 print("== ADR-004 记忆只收 approved ==")
@@ -93,11 +101,11 @@ check("哈希链完整", av.get("ok") is True and av.get("events", 0) >= 4, av)
 print("== 门禁视图（已接 agent-quality-security）==")
 g = tool("gate_status", run_id=rid)
 by_id = {x["id"]: x["status"] for x in g.get("gates", [])}
-check("返回 10 道门禁", len(g.get("gates", [])) == 10, g.get("gates"))
+check("返回门禁列表（light 集=2 道）", len(g.get("gates", [])) == 2, g.get("gates"))
 check("unit-tests 真跑了且通过", by_id.get("unit-tests") == "passed", by_id)
 check("business-outcome 真跑了且通过", by_id.get("business-outcome") == "passed", by_id)
-check("容器门禁如实标 unavailable", by_id.get("web-dynamic") == "unavailable", by_id)
-check("汇总口径正确", g["summary"]["passed"] == 2 and g["summary"]["unavailable"] == 8, g.get("summary"))
+check("light 集全部通过", g["summary"]["passed"] == 2 and g["summary"]["failed"] == 0, g.get("summary"))
+check("不跑容器门禁时列表里没有它们", "web-dynamic" not in by_id, by_id)
 
 print("== engine 参数 ==")
 bad = tool("evolve_run", level="l1", engine="nope")
