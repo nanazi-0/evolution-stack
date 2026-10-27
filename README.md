@@ -11,6 +11,30 @@ DSH（执行器/底盘）
        └─ local/agent-quality-security     裁判层
 ```
 
+## 克隆
+
+```powershell
+git clone --recursive git@github.com:nanazi-0/evolution-stack.git
+```
+
+四个组件是 **submodule**，不是复制进来的代码：
+
+- `local/*` → 你自己的仓库（`nanazi-0/agent-evolution-platform`、`nanazi-0/agent-quality-security`）
+- `vendor/*` → 上游项目引用（`volcengine/OpenViking` 111 MB AGPLv3、`google-research/harness2` Apache-2.0）
+
+只想要父仓库不拉大件：
+
+```powershell
+git clone git@github.com:nanazi-0/evolution-stack.git
+git submodule update --init local/agent-evolution-platform local/agent-quality-security
+```
+
+更新上游到最新：
+
+```powershell
+git submodule update --remote vendor/openviking vendor/harness2
+```
+
 ## 目录
 
 | 路径 | 内容 | 来源 |
