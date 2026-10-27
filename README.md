@@ -96,7 +96,7 @@ git -C local\agent-evolution-platform push -u github main
 | SHA-256 审计链 | ✅ 生效：`audit_verify` 可校验 |
 | 十道门禁 | ✅ 已接 agent-quality-security：unit-tests 与 business-outcome 真跑，其余 8 道如实标 unavailable |
 | 候选生成（PPC） | ⚠️ 占位：`evolve_run` 只建 run 记录 |
-| OpenViking 读写 | ⚠️ 占位：`memory_recall` 返回空 |
+| 记忆读写 | ✅ 已接适配器：local 后端可用；`MEMORY_BACKEND=openviking` + `OPENVIKING_URL` 即切真服务 |
 | DSH 执行器适配器 | ✅ 已实现 `control/eval/runner.py`：断言驱动打分，echo 引擎可直接跑 |
 
 **当前状态 = 治理骨架可跑，真实子系统未接线。** 这不是"完成品"，但所有安全规则已经在代码里，接功能不会绕过它们。
@@ -181,3 +181,14 @@ runner 会把 `DSH_HOME` 指向 `work/_eval-home`，原因有两条：
 
 项目自己的输出目录（`.runtime` `reports` `data` `test-results`）已用目录联接重定向到
 `work/_qs-store/`，因为沙箱不允许子进程写工作区外。
+### 记忆适配器（2026-10-27）
+
+`control/adapters/memory.py` 两个后端：
+
+| 后端 | 触发条件 | 状态 |
+|---|---|---|
+| `local` | 默认（未配 `OPENVIKING_URL`） | ✅ 已验证：commit → recall 闭环 |
+| `openviking` | 配了 `OPENVIKING_URL`，或 `MEMORY_BACKEND=openviking` | ⚠️ 按官方 SDK 的 `/api/v1/resources`、`/api/v1/search/search` 实现，**未起服务无法验证** |
+
+local 后端写 `work/evolution-state/memory.jsonl`，一行一条，可直接 grep。
+召回是朴素子串匹配——够用、可解释，但不是语义检索；要语义就切 OpenViking。

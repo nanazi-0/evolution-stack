@@ -259,10 +259,18 @@ def t_audit_verify(args: dict) -> dict:
     return {"ok": True, "events": len(state["audit"])}
 
 
+def _memory():
+    if str(ADAPTER_DIR) not in sys.path:
+        sys.path.insert(0, str(ADAPTER_DIR))
+    import memory as mem
+    return mem
+
+
 def t_memory_recall(args: dict) -> dict:
-    url = os.environ.get("OPENVIKING_URL", "")
-    return {"query": args.get("query", ""), "hits": [],
-            "note": "骨架：未接 OpenViking" if not url else f"骨架：已配置 {url}，但适配器未实现"}
+    mem = _memory()
+    out = mem.recall(str(args.get("query", "")), int(args.get("top_k", 5)))
+    out["query"] = args.get("query", "")
+    return out
 
 
 def t_memory_commit(args: dict) -> dict:
@@ -272,10 +280,16 @@ def t_memory_commit(args: dict) -> dict:
         return {"error": "没有找到 run"}
     if run["status"] != "approved":   # ADR-004 硬规则
         return {"error": f"ADR-004：只有 approved 的 run 能写入记忆，当前是 {run['status']}"}
-    state["memory"].append({"run_id": run["run_id"], "at": int(time.time())})
-    _audit(state, "memory.commit", {"run_id": run["run_id"]})
+    mem = _memory()
+    ev = run.get("evaluation") or {}
+    summary = (f"run={run['run_id']} level={run['level']} engine={run.get('engine')} "
+               f"score={ev.get('score')} passed={ev.get('passed')} objective={run.get('objective','')}")
+    res = mem.remember(run["run_id"], summary, {"level": run["level"], "engine": run.get("engine")})
+    state["memory"].append({"run_id": run["run_id"], "at": int(time.time()),
+                            "backend": res.get("backend"), "ok": res.get("ok")})
+    _audit(state, "memory.commit", {"run_id": run["run_id"], "backend": res.get("backend")})
     _save(state)
-    return {"committed": True, "run_id": run["run_id"]}
+    return {"committed": bool(res.get("ok")), "run_id": run["run_id"], "memory": res}
 
 
 TOOLS = [
