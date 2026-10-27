@@ -1,0 +1,12 @@
+# 私钥绝不入库
+control/.ssh/
+*.pem
+*.key
+
+# 运行状态与产物（都在工作区，但仍防误提交）
+.runtime/
+reports/
+data/
+node_modules/
+.venv/
+__pycache__/

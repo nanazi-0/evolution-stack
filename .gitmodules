@@ -1,0 +1,12 @@
+[submodule "local/agent-evolution-platform"]
+	path = local/agent-evolution-platform
+	url = git@github.com:nanazi-0/agent-evolution-platform.git
+[submodule "local/agent-quality-security"]
+	path = local/agent-quality-security
+	url = git@github.com:nanazi-0/agent-quality-security.git
+[submodule "vendor/openviking"]
+	path = vendor/openviking
+	url = https://github.com/volcengine/OpenViking.git
+[submodule "vendor/harness2"]
+	path = vendor/harness2
+	url = https://github.com/google-research/harness2.git
