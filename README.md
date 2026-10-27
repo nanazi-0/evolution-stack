@@ -91,10 +91,10 @@ git -C local\agent-evolution-platform push -u github main
 |---|---|
 | MCP stdio 协议 | ✅ 已实现（8 个工具） |
 | ADR-005 预算分级 | ✅ 生效：l1 拒绝多代，未知级别拒绝 |
-| ADR-002 具名批准 | ✅ 生效：缺 actor/reason 直接拒绝 |
+| ADR-002 具名批准 | ✅ 生效：缺 actor/reason 拒绝；门禁失败拒绝；缺测门禁需显式确认 |
 | ADR-004 记忆只收 approved | ✅ 生效：未批准的 run 写记忆会被拒 |
 | SHA-256 审计链 | ✅ 生效：`audit_verify` 可校验 |
-| 十道门禁 | ⚠️ 占位：返回 10 项，全部 skipped（等接 agent-quality-security）|
+| 十道门禁 | ✅ 已接 agent-quality-security：unit-tests 与 business-outcome 真跑，其余 8 道如实标 unavailable |
 | 候选生成（PPC） | ⚠️ 占位：`evolve_run` 只建 run 记录 |
 | OpenViking 读写 | ⚠️ 占位：`memory_recall` 返回空 |
 | DSH 执行器适配器 | ✅ 已实现 `control/eval/runner.py`：断言驱动打分，echo 引擎可直接跑 |
@@ -166,3 +166,18 @@ runner 会把 `DSH_HOME` 指向 `work/_eval-home`，原因有两条：
 3 条用例、`deepseek-flash`：**score=0.3333（1/3 通过）**，p95 延迟 **83 秒/条**。
 
 延迟主要来自每条用例都要起一个 `npx dsh` 进程。批量评测时这个成本要算进去。
+### 门禁接了哪些（2026-10-27 实测）
+
+本机有 Docker CLI 但 daemon 未运行，k6/semgrep/trivy 未安装，所以：
+
+| 门禁 | 状态 |
+|---|---|
+| unit-tests | ✅ 真跑（9 项通过） |
+| business-outcome | ✅ 真跑（4/4 通过） |
+| 其余 8 道 | ⚠️ unavailable（缺 docker / k6 / semgrep / trivy / zap） |
+
+`approve_release` 现在会先跑门禁：有 failed 直接拒绝；有 unavailable 时必须显式传
+`acknowledge_unavailable=true` 并把原因写进 reason，否则拒绝。这条会写进审计链。
+
+项目自己的输出目录（`.runtime` `reports` `data` `test-results`）已用目录联接重定向到
+`work/_qs-store/`，因为沙箱不允许子进程写工作区外。

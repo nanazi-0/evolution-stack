@@ -164,18 +164,38 @@ def t_evolve_status(args: dict) -> dict:
     return {k: run[k] for k in ("run_id", "level", "status", "objective", "created_at")}
 
 
+QS_ROOT = Path(os.environ.get(
+    "EVOLUTION_QUALITY_ROOT",
+    STACK_ROOT / "local" / "agent-quality-security"))
+ADAPTER_DIR = ROOT / "adapters"
+
+
+def collect_gates() -> tuple[list[dict], dict]:
+    """跑 agent-quality-security 里当前环境能跑的门禁。"""
+    if str(ADAPTER_DIR) not in sys.path:
+        sys.path.insert(0, str(ADAPTER_DIR))
+    from quality import run_gates, summarize
+    gates = run_gates(QS_ROOT)
+    return gates, summarize(gates)
+
+
 def t_gate_status(args: dict) -> dict:
     state = _load()
     run = _find(state, str(args.get("run_id", ""))) or (state["runs"][-1] if state["runs"] else None)
     if run is None:
         return {"error": "没有找到 run"}
-    gates = [{"id": g, "passed": False, "skipped": True,
-              "detail": "未接 agent-quality-security（规则层就绪，执行未接）"} for g in GATES]
+    try:
+        gates, summary = collect_gates()
+        err = None
+    except Exception as exc:  # noqa: BLE001
+        gates, summary, err = [], {"total": 0}, f"{type(exc).__name__}: {exc}"
     evaluation = run.get("evaluation")
-    return {"run_id": run["run_id"], "status": run["status"],
-            "evaluation": evaluation,
-            "gates": gates, "passed": 0, "total": len(gates),
-            "note": "evaluation 来自执行器适配器（真实断言）；gates 仍需接 agent-quality-security"}
+    out = {"run_id": run["run_id"], "status": run["status"],
+           "evaluation": evaluation, "gates": gates, "summary": summary,
+           "note": "gates 来自 agent-quality-security（unavailable 表示环境缺依赖，不等于通过）"}
+    if err:
+        out["gate_error"] = err
+    return out
 
 
 def t_approve(args: dict) -> dict:
@@ -187,11 +207,32 @@ def t_approve(args: dict) -> dict:
     run = _find(state, str(args.get("run_id", ""))) or (state["runs"][-1] if state["runs"] else None)
     if run is None:
         return {"error": "没有找到 run"}
-    run["approved"] = {"actor": actor, "reason": reason, "at": int(time.time())}
+
+    # ADR-002：门禁是批准的硬前提
+    try:
+        gates, summary = collect_gates()
+        gate_err = None
+    except Exception as exc:  # noqa: BLE001
+        gates, summary, gate_err = [], {"failed": -1, "unavailable": -1}, f"{type(exc).__name__}: {exc}"
+    if gate_err:
+        return {"error": f"ADR-002：门禁无法执行，拒绝批准（{gate_err}）"}
+    if summary.get("failed", 0) > 0:
+        bad = [g["id"] for g in gates if g["status"] == "failed"]
+        return {"error": f"ADR-002：有门禁失败，拒绝批准: {bad}"}
+    if summary.get("unavailable", 0) > 0 and not args.get("acknowledge_unavailable"):
+        miss = [g["id"] for g in gates if g["status"] == "unavailable"]
+        return {"error": (f"ADR-002：{len(miss)} 道门禁未执行（环境缺依赖）: {miss}。"
+                          f"如确认接受，请传 acknowledge_unavailable=true 并在 reason 里写明原因"),
+                "gates": gates, "summary": summary}
+
+    run["approved"] = {"actor": actor, "reason": reason, "at": int(time.time()),
+                       "gates": summary, "acknowledged_unavailable": bool(args.get("acknowledge_unavailable"))}
     run["status"] = "approved"
-    _audit(state, "release.approve", {"run_id": run["run_id"], "actor": actor})
+    _audit(state, "release.approve", {"run_id": run["run_id"], "actor": actor,
+                                      "gates": summary,
+                                      "acknowledged": bool(args.get("acknowledge_unavailable"))})
     _save(state)
-    return {"run_id": run["run_id"], "status": "approved", "actor": actor}
+    return {"run_id": run["run_id"], "status": "approved", "actor": actor, "gates": summary}
 
 
 def t_rollback(args: dict) -> dict:
@@ -248,7 +289,7 @@ TOOLS = [
      {"type": "object", "properties": {"run_id": {"type": "string"}}}),
     ("approve_release", "具名批准晋升（必须给 actor 和 reason）", t_approve,
      {"type": "object", "properties": {"run_id": {"type": "string"}, "actor": {"type": "string"},
-                                       "reason": {"type": "string"}}, "required": ["actor", "reason"]}),
+                                       "reason": {"type": "string"}, "acknowledge_unavailable": {"type": "boolean"}}, "required": ["actor", "reason"]}),
     ("rollback_release", "回滚到上一 approved", t_rollback,
      {"type": "object", "properties": {"actor": {"type": "string"}, "reason": {"type": "string"}}}),
     ("audit_verify", "校验 SHA-256 审计链", t_audit_verify, {"type": "object", "properties": {}}),
