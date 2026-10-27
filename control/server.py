@@ -38,20 +38,28 @@ DSH_PROFILE = os.environ.get("EVOLUTION_DSH_PROFILE", "headless")
 DSH_TIMEOUT = int(os.environ.get("EVOLUTION_DSH_TIMEOUT", "240"))
 
 
-def run_evaluation() -> dict:
-    """调用执行器适配器拿一份真实信封（ADR-006：只有 DSH 或离线引擎，禁止外部 substrate）。"""
+def run_evaluation(engine_name: str | None = None) -> dict:
+    """调用执行器适配器拿一份信封（ADR-006：只有 DSH 或离线引擎，禁止外部 substrate）。
+
+    engine_name: "echo"（默认，秒回零成本）或 "dsh"（真模型，每条用例约 1-2 分钟）。
+    """
+    name = (engine_name or ENGINE or "echo").lower()
     if str(EVAL_DIR) not in sys.path:
         sys.path.insert(0, str(EVAL_DIR))
-    if ENGINE == "dsh":
+    if name == "dsh":
+        if not os.environ.get("DEEPSEEK_API_KEY"):
+            raise RuntimeError("真引擎需要 DEEPSEEK_API_KEY（当前进程环境里没有）")
         from runner import DshEngine, run_eval
         extra = []
         patch = os.environ.get("EVOLUTION_PATCH")
         if patch:
             extra = ["--patch", patch]
         engine = DshEngine(DSH_VERSION, DSH_PROFILE, extra_args=extra)
-    else:
+    elif name == "echo":
         from runner import EchoEngine, run_eval
         engine = EchoEngine()
+    else:
+        raise ValueError(f"未知引擎 {name}，只允许 echo / dsh")
     return run_eval(CANDIDATE_DIR, CASES_FILE, engine, DSH_TIMEOUT)
 
 LEVELS = {  # ADR-005 预算分级
@@ -115,8 +123,11 @@ def t_evolve_run(args: dict) -> dict:
 
     state = _load()
     run_id = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + uuid.uuid4().hex[:6]
+    engine_name = str(args.get("engine", "echo")).lower()
+    if engine_name not in ("echo", "dsh"):
+        return {"error": f"未知引擎 {engine_name}，只允许 echo / dsh"}
     try:
-        evaluation = run_evaluation()
+        evaluation = run_evaluation(engine_name)
     except Exception as exc:                      # 评估失败不能静默变通过
         evaluation = {"passed": False, "score": 0.0, "metrics": {},
                       "failures": [{"id": "evaluator-error", "detail": f"{type(exc).__name__}: {exc}"}]}
@@ -128,17 +139,18 @@ def t_evolve_run(args: dict) -> dict:
         "max_generations": requested,
         "status": "eligible",           # ADR-002：对比式/断言式只能产 eligible
         "created_at": int(time.time()),
+        "engine": engine_name,
         "candidates": [],
         "gates": [],
         "evaluation": evaluation,       # 真实信封（执行器适配器产出）
         "approved": None,
     }
     state["runs"].append(run)
-    _audit(state, "evolve.run", {"run_id": run_id, "level": level,
+    _audit(state, "evolve.run", {"run_id": run_id, "level": level, "engine": engine_name,
                                  "score": evaluation.get("score"), "passed": evaluation.get("passed")})
     _save(state)
-    return {"run_id": run_id, "status": run["status"], "budget": budget,
-            "evaluation": {k: evaluation.get(k) for k in ("passed", "score", "metrics")},
+    return {"run_id": run_id, "status": run["status"], "budget": budget, "engine": engine_name,
+            "evaluation": {k: evaluation.get(k) for k in ("passed", "score", "metrics", "failures")},
             "next": "用 gate_status 看门禁与评估；approve_release 才能晋升"}
 
 
@@ -226,9 +238,10 @@ def t_memory_commit(args: dict) -> dict:
 
 
 TOOLS = [
-    ("evolve_run", "跑一代进化。参数 level(l1/l2/l3)、objective、max_generations", t_evolve_run,
+    ("evolve_run", "跑一代进化。参数 level(l1/l2/l3)、objective、max_generations、engine(echo 秒回不花钱 / dsh 真模型约 4 分钟)", t_evolve_run,
      {"type": "object", "properties": {"level": {"type": "string"}, "objective": {"type": "string"},
-                                       "max_generations": {"type": "integer"}}}),
+                                       "max_generations": {"type": "integer"},
+                                       "engine": {"type": "string", "enum": ["echo", "dsh"]}}}),
     ("evolve_status", "查看某个 run 的状态", t_evolve_status,
      {"type": "object", "properties": {"run_id": {"type": "string"}}}),
     ("gate_status", "查看十道门禁的逐项结果与证据", t_gate_status,

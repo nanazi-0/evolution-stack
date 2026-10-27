@@ -5,6 +5,7 @@
 退出码 0 = 全部通过。
 """
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -12,7 +13,12 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 SERVER = HERE / "server.py"
 
-proc = subprocess.Popen([sys.executable, str(SERVER)],
+# 测试进程里去掉真实 key，保证 engine=dsh 走 fail-closed 分支（不花钱、结果确定）
+_env = dict(os.environ)
+_env.pop("DEEPSEEK_API_KEY", None)
+_env["EVOLUTION_ENGINE"] = "echo"
+
+proc = subprocess.Popen([sys.executable, str(SERVER)], env=_env,
                         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE, text=True, encoding="utf-8")
 
@@ -82,6 +88,14 @@ check("哈希链完整", av.get("ok") is True and av.get("events", 0) >= 4, av)
 print("== 门禁视图 ==")
 g = tool("gate_status", run_id=rid)
 check("返回 10 道门禁且全部未通过（骨架态）", g.get("total") == 10 and g.get("passed") == 0, g)
+
+print("== engine 参数 ==")
+bad = tool("evolve_run", level="l1", engine="nope")
+check("未知引擎被拒", "error" in bad, bad)
+real = tool("evolve_run", level="l1", engine="dsh")
+ev = real.get("evaluation") or {}
+detail = str(((ev.get("failures") or [{}])[0]).get("detail", ""))
+check("缺 key 时真引擎 fail-closed", ev.get("passed") is False and "DEEPSEEK_API_KEY" in detail, real)
 
 proc.stdin.close()
 proc.wait(timeout=5)
