@@ -152,3 +152,17 @@ $env:EVOLUTION_ENGINE = 'dsh'
 （参考 `control/eval/headless-model.patch.yml`）。
 
 `EVOLUTION_ENGINE=echo` 时不消耗任何模型额度，适合验证管道。
+### 评测用独立 DSH_HOME（实测必需）
+
+runner 会把 `DSH_HOME` 指向 `work/_eval-home`，原因有两条：
+
+1. 沙箱只允许子进程写工作区，写 `data/home` 会 `EPERM`；
+2. 评测不该碰生产 profile —— 独立的 home 让评测完全隔离。
+
+`EVOLUTION_DSH_HOME` 可覆盖该路径。
+
+### 真引擎实测数据（2026-10-27）
+
+3 条用例、`deepseek-flash`：**score=0.3333（1/3 通过）**，p95 延迟 **83 秒/条**。
+
+延迟主要来自每条用例都要起一个 `npx dsh` 进程。批量评测时这个成本要算进去。
