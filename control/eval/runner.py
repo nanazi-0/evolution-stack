@@ -68,9 +68,37 @@ class DshEngine:
         self.version = version
         self.profile = profile
         self.extra = extra_args or []
+        self._ws_cache: dict[str, Path] = {}
+
+    def _workspace(self, candidate: Path) -> Path:
+        """把候选 harness 映射成 DSH 能读的工作区。
+
+        DSH 只读工作区里的 AGENTS.md，不认 system_prompt.md，
+        所以这里做一次适配：candidate/system_prompt.md -> <ws>/AGENTS.md。
+        每个候选一个临时工作区，不改动候选本身。
+        """
+        key = str(candidate.resolve())
+        if key in self._ws_cache:
+            return self._ws_cache[key]
+        base = Path(os.environ.get("EVOLUTION_WORKSPACE_ROOT", r"D:\start\ds-harness\work\_eval-ws"))
+        base.mkdir(parents=True, exist_ok=True)
+        ws = base / re.sub(r"[^A-Za-z0-9_.-]", "_", candidate.name)
+        if ws.exists():
+            shutil.rmtree(ws, ignore_errors=True)
+        ws.mkdir(parents=True, exist_ok=True)
+        src = candidate / "system_prompt.md"
+        body = src.read_text(encoding="utf-8") if src.exists() else ""
+        (ws / "AGENTS.md").write_text(
+            "# Candidate Harness\n\n" + body + "\n", encoding="utf-8")
+        skills = candidate / "skills"
+        if skills.is_dir():
+            shutil.copytree(skills, ws / "skills", dirs_exist_ok=True)
+        self._ws_cache[key] = ws
+        return ws
 
     def run(self, candidate: Path, prompt: str, timeout: int) -> RunResult:
         t0 = time.time()
+        ws = self._workspace(candidate)
         cmd = ["npx", "-y", f"@deepseek-ai/dsh@{self.version}",
                "--profile", self.profile, prompt] + self.extra
         env = dict(os.environ)
@@ -81,7 +109,7 @@ class DshEngine:
         try:
             # Windows 上 npx 是 .cmd，必须经 cmd.exe 解析；list2cmdline 负责正确加引号
             if os.name == "nt":
-                proc = subprocess.run(subprocess.list2cmdline(cmd), cwd=str(candidate),
+                proc = subprocess.run(subprocess.list2cmdline(cmd), cwd=str(ws),
                                       capture_output=True, text=True, encoding="utf-8",
                                       errors="replace", timeout=timeout, env=env, shell=True)
             else:

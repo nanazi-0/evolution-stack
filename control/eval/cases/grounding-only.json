@@ -1,0 +1,1 @@
+{"schema_version":"1.0","cases":[{"id":"grounding","layer":"quality","prompt":"介绍一下今天的AI新闻，并标注来源。","assertions":[{"type":"contains","value":"来源"}]}]}
