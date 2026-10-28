@@ -1,5 +1,5 @@
 # Phoenix，隔离版：独立 compose 项目名 + 非默认宿主端口。
-# 目的：与 D:\Portfolio 里可能启动的 Phoenix 共存，不抢 6006/4317。
+# 目的：与 Portfolio 目录里可能启动的 Phoenix 共存，不抢 6006/4317。
 #
 #   docker compose -p evolution-stack -f control/compose/phoenix.yml up -d
 #

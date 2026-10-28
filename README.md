@@ -391,3 +391,36 @@ restart_always = false
 **默认不重启已在运行的服务**（避免打断已建好的向量索引），需要时才加 `-Restart*`。
 注意：在捕获输出的环境（IDE、脚本管道）里启动长驻进程会让父进程一直等，
 所以这个脚本适合在**普通终端**里跑。
+### 隔离自检（可复跑）
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File control\check-isolation.ps1
+```
+
+输出 `ISOLATION=PASS` 表示与 `D:\Portfolio` 之间**没有共享的可变状态**。六项检查：
+
+| # | 检查 | 结果 |
+|---|---|---|
+| 1 | 代码里没有指向 Portfolio 的可执行路径 | PASS（只剩注释与文档提及） |
+| 2 | 没有联接/软链指向外部 | PASS（四个旧联接已全部移除） |
+| 3 | Portfolio 里没有反向引用我们 | PASS |
+| 4 | 我们的端口 1933/14317/16006/18080 在监听，6006/4317 留空 | PASS |
+| 5 | 容器只挂载 `D:\start\ds-harness\*`；卷按 compose 项目名隔离 | PASS |
+| 6 | 五个镜像全部按 `@sha256:` 引用 | PASS |
+
+**共享镜像不等于会冲突**：镜像层是只读的，共享是设计上的节省；
+每个容器有独立的可写层。真正会冲突的是四种：写死的路径、目录联接、
+固定端口、全局命名卷 —— 这四样现在都处理掉了。
+
+| 仍然共享的 | 性质 | 处理 |
+|---|---|---|
+| 镜像层 | 只读 | 无需处理，同 digest 只存一份 |
+| CPU / 内存 | 运行时竞争 | 两边不同时跑重负载 |
+| `docker system prune -a` | 会删掉钉死的镜像 | 删了重拉（`--pull=missing` 兜底） |
+
+端口分工（记在 `control\compose\phoenix.yml` 与 `services.toml`）：
+
+```
+ours : 1933 OpenViking / 18080 embedding / 16006 Phoenix UI / 14317 OTLP
+yours: 6006 / 4317 留空给 Portfolio
+```
