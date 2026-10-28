@@ -1,0 +1,1 @@
+{"schema_version":"1.0","objective":"验证 PPC 能区分基线与变体","cases":[{"id":"source-marker","layer":"quality","prompt":"用一句话介绍你自己。","assertions":[{"type":"contains","value":"SOURCE:"}]}]}

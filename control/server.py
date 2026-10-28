@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import sys
 import time
 import uuid
@@ -143,8 +144,9 @@ def t_evolve_run(args: dict) -> dict:
     engine_name = str(args.get("engine", "echo")).lower()
     if engine_name not in ("echo", "dsh"):
         return {"error": f"未知引擎 {engine_name}，只允许 echo / dsh"}
+    baseline_dir = candidate_for(project)
     try:
-        evaluation = run_evaluation(engine_name, candidate_for(project))
+        evaluation = run_evaluation(engine_name, baseline_dir)
     except Exception as exc:                      # 评估失败不能静默变通过
         evaluation = {"passed": False, "score": 0.0, "metrics": {},
                       "failures": [{"id": "evaluator-error", "detail": f"{type(exc).__name__}: {exc}"}]}
@@ -163,11 +165,51 @@ def t_evolve_run(args: dict) -> dict:
         "evaluation": evaluation,       # 真实信封（执行器适配器产出）
         "approved": None,
     }
+    # ---- PPC：产生并探测候选（ADR-002 只到 eligible，不自动晋升）----
+    k = int(args.get("candidates", 0) or 0)
+    if k > 0:
+        mode = str(args.get("propose_mode", "echo")).lower()
+        base_score = float((evaluation.get("metrics") or {}).get("task_success") or 0.0)
+        proposal_root = Path(os.environ.get(
+            "EVOLUTION_PROPOSALS", r"D:\start\ds-harness\work\evolution-state\proposals")) / run_id
+        try:
+            if str(ADAPTER_DIR) not in sys.path:
+                sys.path.insert(0, str(ADAPTER_DIR))
+            from proposer import propose as _propose
+            prop = _propose(baseline_dir, k, run.get("objective", ""), mode, proposal_root)
+        except Exception as exc:  # noqa: BLE001
+            prop = {"error": f"{type(exc).__name__}: {exc}", "variants": []}
+        cands = []
+        for v in prop.get("variants", []):
+            if v.get("rejected"):
+                cands.append({"id": v["id"], "status": "rejected", "reason": v["rejected"]})
+                continue
+            try:
+                env_v = run_evaluation(engine_name, Path(v["path"]))
+                score = float((env_v.get("metrics") or {}).get("task_success") or 0.0)
+                cands.append({"id": v["id"], "status": "probed", "score": score,
+                              "path": v["path"],
+                              "delta": round(score - base_score, 4)})
+            except Exception as exc:  # noqa: BLE001
+                cands.append({"id": v["id"], "status": "error", "reason": f"{type(exc).__name__}: {exc}"})
+        run["candidates"] = cands
+        probed = [c for c in cands if c.get("status") == "probed"]
+        if probed:
+            best = max(probed, key=lambda c: c["score"])
+            run["champion"] = best
+            run["baseline_score"] = round(base_score, 4)
+            run["champion_improved"] = best["score"] >= base_score + 0.01
+        run["proposal"] = {"mode": prop.get("mode", mode), "count": len(cands),
+                           "error": prop.get("error")}
+
     state["runs"].append(run)
     _audit(state, "evolve.run", {"run_id": run_id, "level": level, "engine": engine_name,
                                  "score": evaluation.get("score"), "passed": evaluation.get("passed")})
     _save(state)
     return {"run_id": run_id, "project": project, "status": run["status"], "budget": budget, "engine": engine_name,
+            "baseline_score": run.get("baseline_score"),
+            "champion": run.get("champion"),
+            "candidates": run.get("candidates", []),
             "evaluation": {k: evaluation.get(k) for k in ("passed", "score", "metrics", "failures")},
             "next": "用 gate_status 看门禁与评估；approve_release 才能晋升"}
 
@@ -189,6 +231,35 @@ QS_ROOT = Path(os.environ.get(
 ADAPTER_DIR = ROOT / "adapters"
 
 
+import threading
+
+_GATE_JOB = {"running": False, "started": 0, "finished": 0, "error": None, "summary": None}
+
+
+def gate_job_state() -> dict:
+    return dict(_GATE_JOB)
+
+
+def start_gate_run() -> dict:
+    """后台跑一遍完整 pipeline（约 4-5 分钟），立即返回。"""
+    if _GATE_JOB["running"]:
+        return {"started": False, "reason": "already running", "job": gate_job_state()}
+    _GATE_JOB.update({"running": True, "started": int(time.time()), "error": None})
+
+    def _work():
+        try:
+            gates, summary = collect_gates(heavy=True)
+            _GATE_JOB["summary"] = summary
+        except Exception as exc:  # noqa: BLE001
+            _GATE_JOB["error"] = f"{type(exc).__name__}: {exc}"
+        finally:
+            _GATE_JOB["running"] = False
+            _GATE_JOB["finished"] = int(time.time())
+
+    threading.Thread(target=_work, daemon=True).start()
+    return {"started": True, "job": gate_job_state(), "hint": "用 gate_status 轮询，完成后会给逐项结果"}
+
+
 def collect_gates(heavy: bool = False) -> tuple[list[dict], dict]:
     """跑 agent-quality-security 里当前环境能跑的门禁。"""
     if str(ADAPTER_DIR) not in sys.path:
@@ -204,17 +275,22 @@ def t_gate_status(args: dict) -> dict:
     if run is None:
         return {"error": "没有找到 run"}
     try:
-        gates, summary = collect_gates(heavy=bool(args.get("heavy")))
+        gates, summary = collect_gates(heavy=False)
         err = None
     except Exception as exc:  # noqa: BLE001
         gates, summary, err = [], {"total": 0}, f"{type(exc).__name__}: {exc}"
     evaluation = run.get("evaluation")
     out = {"run_id": run["run_id"], "status": run["status"],
            "evaluation": evaluation, "gates": gates, "summary": summary,
-           "note": "gates 来自 agent-quality-security（unavailable 表示环境缺依赖，不等于通过）"}
+           "gate_job": gate_job_state(),
+           "note": "gates 来自 agent-quality-security 最近一次报告；要重跑请调 gate_run"}
     if err:
         out["gate_error"] = err
     return out
+
+
+def t_gate_run(args: dict) -> dict:
+    return start_gate_run()
 
 
 def t_approve(args: dict) -> dict:
@@ -229,7 +305,7 @@ def t_approve(args: dict) -> dict:
 
     # ADR-002：门禁是批准的硬前提
     try:
-        gates, summary = collect_gates(heavy=bool(args.get("heavy")))
+        gates, summary = collect_gates(heavy=False)
         gate_err = None
     except Exception as exc:  # noqa: BLE001
         gates, summary, gate_err = [], {"failed": -1, "unavailable": -1}, f"{type(exc).__name__}: {exc}"
@@ -244,7 +320,28 @@ def t_approve(args: dict) -> dict:
                           f"如确认接受，请传 acknowledge_unavailable=true 并在 reason 里写明原因"),
                 "gates": gates, "summary": summary}
 
+    # 晋升：把冠军变体固化成 release，并更新 current 指针（ADR-004：只有 approved 才落盘）
+    promotion = None
+    champ = run.get("champion")
+    if champ and champ.get("path"):
+        try:
+            proj_root = CANDIDATES_ROOT / run.get("project", PROJECT_DEFAULT)
+            rel_dir = proj_root / "releases" / run["run_id"]
+            if rel_dir.exists():
+                shutil.rmtree(rel_dir, ignore_errors=True)
+            shutil.copytree(Path(champ["path"]), rel_dir)
+            cur = proj_root / "current.json"
+            prev = json.loads(cur.read_text(encoding="utf-8")) if cur.exists() else None
+            cur.write_text(json.dumps({"run_id": run["run_id"], "path": str(rel_dir),
+                                       "previous": (prev or {}).get("run_id"),
+                                       "approved_by": actor, "at": int(time.time())},
+                                      ensure_ascii=False, indent=2), encoding="utf-8")
+            promotion = {"release": str(rel_dir), "previous": (prev or {}).get("run_id")}
+        except Exception as exc:  # noqa: BLE001
+            promotion = {"error": f"{type(exc).__name__}: {exc}"}
+
     run["approved"] = {"actor": actor, "reason": reason, "at": int(time.time()),
+                       "promotion": promotion,
                        "gates": summary, "acknowledged_unavailable": bool(args.get("acknowledge_unavailable"))}
     run["status"] = "approved"
     _audit(state, "release.approve", {"run_id": run["run_id"], "actor": actor,
@@ -317,6 +414,8 @@ TOOLS = [
     ("evolve_run", "跑一代进化。参数 level(l1/l2/l3)、objective、max_generations、engine(echo 秒回不花钱 / dsh 真模型约 4 分钟)", t_evolve_run,
      {"type": "object", "properties": {"level": {"type": "string"}, "objective": {"type": "string"},
                                        "project": {"type": "string"},
+                                       "candidates": {"type": "integer"},
+                                       "propose_mode": {"type": "string", "enum": ["echo", "llm"]},
                                        "max_generations": {"type": "integer"},
                                        "engine": {"type": "string", "enum": ["echo", "dsh"]}}}),
     ("evolve_status", "查看某个 run 的状态（按项目隔离）", t_evolve_status,
@@ -328,6 +427,7 @@ TOOLS = [
                                        "reason": {"type": "string"}, "acknowledge_unavailable": {"type": "boolean"}}, "required": ["actor", "reason"]}),
     ("rollback_release", "回滚到上一 approved", t_rollback,
      {"type": "object", "properties": {"actor": {"type": "string"}, "reason": {"type": "string"}}}),
+    ("gate_run", "后台重跑十道门禁（约 4-5 分钟，立即返回）", t_gate_run, {"type": "object", "properties": {}}),
     ("audit_verify", "校验 SHA-256 审计链", t_audit_verify, {"type": "object", "properties": {}}),
     ("memory_recall", "按项目查历史经验", t_memory_recall,
      {"type": "object", "properties": {"query": {"type": "string"}, "project": {"type": "string"}, "top_k": {"type": "integer"}}}),

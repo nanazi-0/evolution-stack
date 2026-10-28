@@ -145,10 +145,21 @@ def _light_gates(project_root: Path) -> list[dict]:
 def run_gates(project_root: Path, python_exe: str | None = None,
               timeout: int = PIPELINE_TIMEOUT, heavy: bool = False) -> list[dict]:
     """heavy=False 时优先读 15 分钟内的缓存报告；heavy=True 强制重跑 pipeline。"""
+    if os.environ.get("EVOLUTION_GATE_SET", "full").lower() == "light":
+        return _light_gates(project_root)
+
     cache = _load_cache()
-    fresh = bool(cache.get("gates")) and (time.time() - cache.get("at", 0) < CACHE_TTL)
-    if fresh and not heavy:
-        return cache["gates"]
+    if not heavy:
+        # 非 heavy 一律不阻塞：有缓存就用（哪怕过期，标记 stale），没缓存就明确说没报告
+        gates = cache.get("gates") or []
+        if gates:
+            age = int(time.time() - cache.get("at", 0))
+            for g in gates:
+                g["age_seconds"] = age
+                g["stale"] = age > CACHE_TTL
+            return gates
+        return [{"id": "gates", "status": "unavailable", "seconds": 0, "stale": True,
+                 "detail": "还没有门禁报告，请调用 gate_run 生成（约 4-5 分钟）"}]
 
     ok, detail = _run_pipeline(project_root, timeout)
     report = _latest_report(project_root)

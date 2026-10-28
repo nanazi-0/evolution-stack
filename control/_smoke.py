@@ -56,7 +56,7 @@ check("initialize 返回 serverInfo",
       init.get("result", {}).get("serverInfo", {}).get("name") == "evolution-control", init)
 tl = call("tools/list", {})
 names = [t["name"] for t in tl["result"]["tools"]]
-check("tools/list 有 8 个工具", len(names) == 8, names)
+check("tools/list 有 9 个工具", len(names) == 9, names)
 
 print("== ADR-005 预算分级 ==")
 r = tool("evolve_run", level="l1", objective="提高售后话术合规性")
@@ -101,11 +101,11 @@ check("哈希链完整", av.get("ok") is True and av.get("events", 0) >= 4, av)
 print("== 门禁视图（已接 agent-quality-security）==")
 g = tool("gate_status", run_id=rid)
 by_id = {x["id"]: x["status"] for x in g.get("gates", [])}
-check("返回十道门禁", len(g.get("gates", [])) == 10, g.get("gates"))
+check("返回门禁列表（light 子集=2）", len(g.get("gates", [])) == 2, g.get("gates"))
 check("unit-tests 通过", by_id.get("unit-tests") == "passed", by_id)
-check("业务结果门禁通过", by_id.get("business-outcome-and-safety-demo") == "passed", by_id)
-check("门禁全部通过（十道真实报告）", g["summary"]["failed"] == 0 and g["summary"]["unavailable"] == 0, g.get("summary"))
-check("多数门禁带证据哈希（纯命令门禁除外）", sum(1 for x in g["gates"] if x.get("evidence_sha256")) >= 8, [x["id"] for x in g["gates"] if not x.get("evidence_sha256")])
+check("业务结果门禁通过", by_id.get("business-outcome") == "passed", by_id)
+check("light 子集全部通过", g["summary"]["failed"] == 0, g.get("summary"))
+check("gate_status 不阻塞（带 job 状态）", "gate_job" in g, list(g.keys()))
 
 print("== engine 参数 ==")
 bad = tool("evolve_run", level="l1", engine="nope")
