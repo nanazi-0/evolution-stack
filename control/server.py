@@ -320,6 +320,13 @@ def t_approve(args: dict) -> dict:
                           f"如确认接受，请传 acknowledge_unavailable=true 并在 reason 里写明原因"),
                 "gates": gates, "summary": summary}
 
+    # ADR-002：冠军必须有实质改进才允许晋升（minimum_improvement 默认 0.01）
+    champ0 = run.get("champion")
+    if champ0 and not run.get("champion_improved", False):
+        return {"error": (f"ADR-002：冠军 {champ0.get('id')} 相对基线没有实质改进"
+                          f"（delta={champ0.get('delta')}），拒绝晋升"),
+                "baseline_score": run.get("baseline_score"), "champion": champ0}
+
     # 晋升：把冠军变体固化成 release，并更新 current 指针（ADR-004：只有 approved 才落盘）
     promotion = None
     champ = run.get("champion")

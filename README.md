@@ -294,3 +294,13 @@ targets/<project>/
 ├─ releases/<run_id>/   已批准的冠军快照
 └─ current.json        当前发布的指针（含 previous，可回滚）
 ```
+### 晋升的最后一道门（ADR-002）
+
+冠军必须相对基线有实质改进（默认 delta ≥ 0.01），否则 `approve_release` 直接拒绝：
+
+```
+有改进  -> approved，固化到 releases/<run_id>
+delta=0 -> "ADR-002：冠军 v1 相对基线没有实质改进（delta=0.0），拒绝晋升"
+```
+
+这条堵的是"批准一个没变好的版本"。实测两种情形都验证过。
