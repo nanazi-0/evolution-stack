@@ -319,3 +319,46 @@ control/eval/cases/smoke.json      默认
 evolve_run(project="x", candidates=1, engine="echo", cases=".../cases/ppc.json")
   -> baseline 0.0 / champion delta +1.0 -> approve -> releases/<run_id>
 ```
+### 依赖的两个本地服务（2026-10-28 打通）
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File control\start-services.ps1
+```
+
+| 服务 | 端口 | 作用 |
+|---|---|---|
+| embedding（`control/adapters/embeddings_server.py`） | 18080 | OpenAI 兼容；BAAI/bge-small-zh-v1.5，512 维 |
+| OpenViking（容器 `ov-evolution`） | 1933 | 记忆库，api_key 认证 |
+
+为什么自己起 embedding：**OpenViking 必须要 embedding API，而 DeepSeek 只有对话模型**（`deepseek-flash`、`deepseek-v4-pro`）。
+所以用 fastembed 在本地起一个，`api_base=http://host.docker.internal:18080/v1`。
+
+启动 OpenViking 的三个坑：
+
+1. `OPENVIKING_WITH_BOT=0` —— 默认会拉 VikingBot，它起不来会拖垮整个 entrypoint。
+2. `server.host` 必须是 `0.0.0.0`，但 **dev 模式不允许**，所以要 `auth_mode=api_key` + `root_api_key`。
+3. 配置文件**不能带 BOM**，否则报 "expected value at line 1 column 1"。
+
+认证要点：请求头是 **`X-API-Key`**（不是 Bearer）。ROOT key 只能管账号，
+数据读写要用 Admin API 创建的 **user key**；URI 用 `viking://~/memories/...`（`~` 展开成 `viking://user/<user>/`）。
+
+实测：写入后按语义检索能召回（相似度 0.83），且**项目隔离生效**——
+`other` 项目能查到自己的记忆，`evo` 查不到。
+
+### Phoenix 端口隔离（2026-10-28）
+
+原来的 `observability-phoenix-1` 固定占 4317/6006，会和 `D:\Portfolio` 里的项目抢端口。
+现在改成独立 compose 项目 + 非默认端口：
+
+```powershell
+docker compose -p evolution-stack -f control\compose\phoenix.yml up -d
+```
+
+| | 旧 | 新 |
+|---|---|---|
+| 容器名 | `observability-phoenix-1` | `evolution-stack-phoenix-1` |
+| UI/HTTP | 6006 | **16006** |
+| OTLP | 4317 | **14317** |
+| 环境变量 | — | `PHOENIX_HOST=http://127.0.0.1:16006` |
+
+`Portfolio` 用它的 6006/4317，互不干扰。telemetry 与 phoenix 两道门禁已在 16006 上验证通过。

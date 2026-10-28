@@ -36,7 +36,7 @@ def _post(url: str, payload: dict, timeout: int = 30) -> tuple[int, dict]:
     req = urllib.request.Request(url, data=data, method="POST",
                                  headers={"Content-Type": "application/json"})
     if OV_KEY:
-        req.add_header("Authorization", f"Bearer {OV_KEY}")
+        req.add_header("X-API-Key", OV_KEY)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.status, json.loads(resp.read().decode("utf-8") or "{}")
@@ -52,10 +52,12 @@ def remember(project: str, run_id: str, summary: str, meta: dict | None = None) 
               "meta": meta or {}, "at": int(time.time())}
 
     if backend == "openviking":
-        status, body = _post(f"{OV_URL}/api/v1/resources", {
-            "uri": f"viking://user/memories/evolution/{project}/{run_id}",
+        uri = f"viking://~/memories/evolution/{project}/{run_id}"
+        status, body = _post(f"{OV_URL}/api/v1/content/write", {
+            "uri": uri,
             "content": summary,
-            "metadata": {"run_id": run_id, "project": project, **(meta or {})},
+            "tags": [f"project:{project}", "source:evolution-stack"],
+            "wait": True,
         })
         return {"backend": "openviking", "ok": 200 <= status < 300,
                 "status": status, "detail": body if status >= 300 else "written"}
@@ -69,12 +71,18 @@ def recall(project: str, query: str, top_k: int = 5) -> dict:
     backend = _backend()
     if backend == "openviking":
         status, body = _post(f"{OV_URL}/api/v1/search/search", {
-            "query": query, "top_k": top_k, "project": project,
+            "query": query,
+            "limit": max(top_k * 4, 8),
         })
-        hits = body.get("results") or body.get("items") or [] if isinstance(body, dict) else []
-        return {"backend": "openviking", "ok": 200 <= status < 300,
-                "status": status, "hits": hits[:top_k],
-                "detail": None if status < 300 else body.get("error", "")}
+        raw = ((body.get("result") or {}).get("memories") or []) if isinstance(body, dict) else []
+        # 服务端把 ~ 解析成 viking://user/<user>/...，所以按路径里的项目段过滤
+        marker = f"/evolution/{project}/"
+        hits = [{"uri": h.get("uri"), "abstract": h.get("abstract"), "score": h.get("score"),
+                 "level": h.get("level")}
+                for h in raw if marker in str(h.get("uri", ""))]
+        return {"backend": "openviking", "ok": 200 <= status < 300, "status": status,
+                "hits": hits[:top_k], "scanned": len(raw),
+                "detail": None if status < 300 else str(body)[:200]}
     if not LOCAL_FILE.exists():
         return {"backend": "local", "ok": True, "hits": [], "note": "记忆库为空", "project": project}
     rows = []

@@ -61,7 +61,7 @@ def _env(project_root: Path) -> dict:
     tmp = os.environ.get("EVOLUTION_TMP", r"D:\start\ds-harness\work\_tmp")
     os.makedirs(tmp, exist_ok=True)
     env["TMP"] = env["TEMP"] = tmp
-    env.setdefault("PHOENIX_HOST", "http://127.0.0.1:6006")
+    env.setdefault("PHOENIX_HOST", "http://127.0.0.1:16006")
     env.setdefault("PLAYWRIGHT_BROWSERS_PATH", r"D:\start\ds-harness\work\_pw-browsers")
     return env
 

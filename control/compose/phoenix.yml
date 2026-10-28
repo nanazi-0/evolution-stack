@@ -1,0 +1,42 @@
+# Phoenix，隔离版：独立 compose 项目名 + 非默认宿主端口。
+# 目的：与 D:\Portfolio 里可能启动的 Phoenix 共存，不抢 6006/4317。
+#
+#   docker compose -p evolution-stack -f control/compose/phoenix.yml up -d
+#
+# 宿主端口：
+#   16006 -> 容器 6006（Phoenix UI / HTTP API）
+#   14317 -> 容器 4317（OTLP gRPC）
+#
+# 对应环境变量：PHOENIX_HOST=http://127.0.0.1:16006
+services:
+  phoenix-volume-init:
+    image: arizephoenix/phoenix:version-20.14.0-nonroot
+    user: "0"
+    entrypoint: ["/usr/bin/python3.13"]
+    command:
+      - "-c"
+      - "import os, pathlib; p=pathlib.Path('/mnt/data'); p.mkdir(parents=True, exist_ok=True); os.chown(p, 65532, 65532)"
+    volumes:
+      - phoenix-data:/mnt/data
+
+  phoenix:
+    image: arizephoenix/phoenix:version-20.14.0-nonroot
+    restart: unless-stopped
+    depends_on:
+      phoenix-volume-init:
+        condition: service_completed_successfully
+    ports:
+      - "16006:6006"
+      - "14317:4317"
+    healthcheck:
+      test: ["CMD", "/usr/bin/python3.13", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:6006/healthz', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    environment:
+      PHOENIX_WORKING_DIR: /mnt/data
+    volumes:
+      - phoenix-data:/mnt/data
+
+volumes:
+  phoenix-data:
