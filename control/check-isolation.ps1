@@ -88,6 +88,22 @@ Check '.dsh 是指向 D 盘的联接' ([bool]$isJunction) "当前不是联接"
 $cTemp = Test-Path "$env:LOCALAPPDATA\Temp\fastembed_cache"
 Check 'C 盘 Temp 没有模型缓存' (-not $cTemp) "发现 $env:LOCALAPPDATA\Temp\fastembed_cache"
 
+Write-Host '== 8. 登录态不在 agent 可写目录 =='
+$secrets = 'D:\start\ds-harness\secrets'
+# 浏览器 profile 的判据是凭据特征文件，不是目录名（_pw-browsers 只是浏览器二进制）
+$profilesInWork = Get-ChildItem 'D:\start\ds-harness\work' -Directory -Force -ErrorAction SilentlyContinue |
+    Where-Object {
+        (Test-Path (Join-Path $_.FullName 'Default\Cookies')) -or
+        (Test-Path (Join-Path $_.FullName 'Default\Network\Cookies')) -or
+        (Test-Path (Join-Path $_.FullName 'Default\Login Data')) -or
+        (Test-Path (Join-Path $_.FullName 'Local State'))
+    }
+Check 'work 下没有浏览器 profile' ($profilesInWork.Count -eq 0) (($profilesInWork | ForEach-Object { $_.Name }) -join ',')
+Check 'secrets 目录存在' (Test-Path $secrets) $secrets
+$acl = cmd /c "icacls `"$secrets`" 2>nul"
+$hasInherit = ($acl | Select-String -Pattern '\(I\)').Count -gt 0
+Check 'secrets 不继承父目录权限' (-not $hasInherit) '仍存在 (I) 继承项'
+
 Write-Host ''
 if ($fails -eq 0) {
     Write-Host 'ISOLATION=PASS  与 Portfolio 无共享的可变状态'
