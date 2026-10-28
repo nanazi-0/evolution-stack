@@ -56,7 +56,7 @@ check("initialize 返回 serverInfo",
       init.get("result", {}).get("serverInfo", {}).get("name") == "evolution-control", init)
 tl = call("tools/list", {})
 names = [t["name"] for t in tl["result"]["tools"]]
-check("tools/list 有 9 个工具", len(names) == 9, names)
+check("tools/list 有 10 个工具", len(names) == 10, names)
 
 print("== ADR-005 预算分级 ==")
 r = tool("evolve_run", level="l1", objective="提高售后话术合规性")
@@ -114,6 +114,12 @@ real = tool("evolve_run", level="l1", engine="dsh")
 ev = real.get("evaluation") or {}
 detail = str(((ev.get("failures") or [{}])[0]).get("detail", ""))
 check("缺 key 时真引擎 fail-closed", ev.get("passed") is False and "DEEPSEEK_API_KEY" in detail, real)
+
+print("== 预算硬约束 / 待批准队列 ==")
+b = tool("evolve_run", level="l1", candidates=2, project="budget-test", engine="echo")
+check("l1 超过 1 个候选被拒", "error" in b and "ADR-005" in b["error"], b)
+pend = tool("pending_approvals")
+check("待批准队列可用", isinstance(pend.get("pending"), list), pend)
 
 print("== 项目隔离 ==")
 pa = tool("evolve_run", level="l1", project="alpha", objective="alpha 项目")

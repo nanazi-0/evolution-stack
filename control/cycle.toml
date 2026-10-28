@@ -1,0 +1,17 @@
+# 自动进化周期的配置（control/evolve-cycle.py 读取；计划任务 DSH-Evolve-Cycle 调用）
+#
+# 原则：机器只负责"把候选摆到桌上"，批准必须由人来做（ADR-002）。
+
+[cycle]
+# 预算级别：l1 最多 1 个候选，l2 最多 2 个，l3 最多 3 个（ADR-005 硬约束）
+level = "l1"
+candidates = 1
+
+# echo = 免费但只能验证流程；dsh = 真模型，一个项目约 2-5 分钟
+engine = "echo"
+
+# echo = 确定性变体；llm = 调 DeepSeek 改写（需要 DEEPSEEK_API_KEY）
+propose_mode = "echo"
+
+# 要跑的项目（targets/ 下的一级目录名）
+projects = ["shop-support"]

@@ -180,6 +180,10 @@ def t_evolve_run(args: dict) -> dict:
     }
     # ---- PPC：产生并探测候选（ADR-002 只到 eligible，不自动晋升）----
     k = int(args.get("candidates", 0) or 0)
+    cap = int(budget["candidates"])
+    if k > cap:
+        return {"error": f"ADR-005：{level} 最多 {cap} 个候选，请求了 {k}；要更多请升级 level",
+                "level": level, "budget": budget}
     if k > 0:
         mode = str(args.get("propose_mode", "echo")).lower()
         base_score = float((evaluation.get("metrics") or {}).get("task_success") or 0.0)
@@ -300,6 +304,30 @@ def t_gate_status(args: dict) -> dict:
     if err:
         out["gate_error"] = err
     return out
+
+
+def t_pending(args: dict) -> dict:
+    """列出等待批准的 run（eligible + 冠军有实质改进 + 未批准）。"""
+    state = _load()
+    project = args.get("project")
+    out = []
+    for r in state["runs"]:
+        if r.get("status") != "eligible":
+            continue
+        if project and r.get("project", "default") != project:
+            continue
+        champ = r.get("champion")
+        if not champ or not r.get("champion_improved"):
+            continue
+        out.append({"run_id": r["run_id"], "project": r.get("project", "default"),
+                    "created_at": r.get("created_at"), "engine": r.get("engine"),
+                    "baseline_score": r.get("baseline_score"),
+                    "champion": {"id": champ.get("id"), "score": champ.get("score"),
+                                 "delta": champ.get("delta")},
+                    "objective": r.get("objective", "")[:60]})
+    out.sort(key=lambda x: x.get("created_at") or 0, reverse=True)
+    return {"pending": out, "count": len(out),
+            "hint": "用 approve_release(run_id, actor, reason) 批准"}
 
 
 def t_gate_run(args: dict) -> dict:
@@ -473,6 +501,7 @@ TOOLS = [
     ("rollback_release", "回滚到上一 approved", t_rollback,
      {"type": "object", "properties": {"actor": {"type": "string"}, "reason": {"type": "string"}}}),
     ("gate_run", "后台重跑十道门禁（约 4-5 分钟，立即返回）", t_gate_run, {"type": "object", "properties": {}}),
+    ("pending_approvals", "列出等待批准的 run", t_pending, {"type": "object", "properties": {"project": {"type": "string"}}}),
     ("audit_verify", "校验 SHA-256 审计链", t_audit_verify, {"type": "object", "properties": {}}),
     ("memory_recall", "按项目查历史经验", t_memory_recall,
      {"type": "object", "properties": {"query": {"type": "string"}, "project": {"type": "string"}, "top_k": {"type": "integer"}}}),

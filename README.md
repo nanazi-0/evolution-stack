@@ -436,3 +436,40 @@ rollback -> {"error": "没有上一版可回滚（previous 为空）"}   单向�
 ```
 
 回滚后 `previous` 置空，想前进必须重新批准一个 run —— 防止把旧版"回滚"成新版。
+### 自动进化周期（2026-10-28）
+
+之前进化必须人工触发，现在是半自动：
+
+```
+Windows 计划任务 DSH-Evolve-Cycle（每天 03:00）
+  -> control/evolve-cycle.py
+      -> 对 cycle.toml 里的每个项目跑一轮 evolve
+      -> 只有"冠军有实质改进"的才进待批准队列
+      -> 写 work/evolution-state/pending.json
+  -> pending_approvals 工具可查
+  -> 人工 approve_release 才晋升（机器绝不自动批准）
+```
+
+配置 `control/cycle.toml`：`level` / `candidates` / `engine` / `propose_mode` / `projects`。
+预算按 level 硬卡（ADR-005）：l1→1、l2→2、l3→3 个候选，超了直接报错。
+
+```powershell
+.\control\evolve-cycle.py --dry-run     # 只看配置
+.\control\evolve-cycle.py               # 跑一轮
+schtasks /change /tn DSH-Evolve-Cycle /disable   # 暂停定时
+```
+
+### 三个引擎/组件的实际使用状态
+
+| 组件 | 状态 | 证据 |
+|---|---|---|
+| 我们自己的 loop（`control/server.py`） | 主力，闭环 | 十道门禁 + PPC + 晋升 + 回滚 |
+| `agent-evolution-platform` 自带引擎 | **已跑通** | `evolutionctl.py doctor` / `run` → `RSI_GATE=ELIGIBLE` |
+| `harness2`（Google） | **可调用，未作为驱动** | `control\harness2.ps1` 在 `python:3.13-slim` 里跑通 demo |
+
+Harness² 的两个硬限制：
+1. 它的 ledger 用 `fcntl`，**Windows 上直接 import 就崩**（`No module named 'fcntl'`）；
+2. `pyproject` 要求 `>=3.12,<3.14`，本机是 3.14，所以只能在容器里跑。
+
+要把它作为真正的进化驱动，需要实现它的 `BenchmarkAdapter` 协议（`harness2/core/spec.py`），
+并接入 `claude_cli` / `opencode` 通道——工作量相当于一个独立子项目，目前只做到"可调用 + 已验证"。
