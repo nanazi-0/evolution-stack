@@ -45,11 +45,21 @@ def main() -> int:
             t0 = time.time()
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=45000)
-                # 等表格里出现数据行
-                page.wait_for_selector("table tr td", timeout=30000)
+                # 榜单页有 table；选品库是卡片布局。两类都要兼容：
+                # 先尝试表格，失败则等商品链接，再退化为 networkidle。
+                try:
+                    page.wait_for_selector("table tr td", state="attached", timeout=15000)
+                except Exception:  # noqa: BLE001
+                    try:
+                        # 选品库的商品链接是不可见的 (<a class="none">)，必须等 attached
+                        page.wait_for_selector('a[href*="/goods/"]', state="attached", timeout=20000)
+                    except Exception:  # noqa: BLE001
+                        page.wait_for_load_state("networkidle", timeout=20000)
                 time.sleep(3)  # 让图表/懒加载列补齐
                 html = page.content()
                 rows = len(re.findall(r"<td", html))
+                goods = len(re.findall(r'href="[^"]*/goods/', html))
+                print(f"[info] {name}: <td>={rows} goods_links={goods}", flush=True)
                 dst = out_dir / f"{name}.dom.html"
                 dst.write_text(html, encoding="utf-8")
                 print(f"[ok] {name}: {len(html)/1024:.0f} KB, {rows} 个 <td>, {time.time()-t0:.1f}s -> {dst}")

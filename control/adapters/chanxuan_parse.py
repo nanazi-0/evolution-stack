@@ -126,6 +126,63 @@ def parse_product_dom(html: str) -> list[dict]:
     return rows
 
 
+def parse_library_dom(html: str) -> list[dict]:
+    """选品库卡片：容器 div 带 id，内含 <a href="/goods/<id>.html">标题</a>。
+    这是唯一能同时拿到 product_id 与业务字段的公开页面。"""
+    soup = BeautifulSoup(html, "lxml")
+    out = []
+    for div in soup.find_all("div", attrs={"id": True}):
+        pid = div.get("id") or ""
+        if not re.fullmatch(r"[A-Za-z0-9_-]{20,}", pid):
+            continue
+        a = div.find("a", href=re.compile(r"/goods/"))
+        if a is None:
+            continue
+        title = re.sub(r"\s+", " ", a.get_text(" ", strip=True)).strip()
+        txt = re.sub(r"\s+", " ", div.get_text(" ", strip=True))
+        price_m = re.search(r"￥\s*([0-9.]+)", txt)
+        comm_m = re.search(r"蝉选高佣\s*([0-9.]+)\s*%", txt)
+        public_m = re.search(r"公开佣金\s*([0-9.]+)\s*%", txt)
+        sales = re.findall(r"([0-9.]+[万千kK]?[-~][0-9.]+[万千kK]?|[0-9.]+[万千kK]?\+?)\s*(?:昨日|昨日销量|7日销量|30日销量)", txt)
+        shop_m = re.search(r"([\u4e00-\u9fa5A-Za-z0-9]+官方旗舰店|[\u4e00-\u9fa5A-Za-z0-9]+旗舰店|[\u4e00-\u9fa5]+店)", txt)
+        score_m = re.search(r"综合体验\s*([0-9.]+)", txt)
+        out.append({
+            "kind": "product",
+            "product_id": pid,
+            "product_url": f"https://www.chanxuan.com{a.get('href')}",
+            "title": title,
+            "price": float(price_m.group(1)) if price_m else None,
+            "commission_rate": round(float(comm_m.group(1)) / 100, 4) if comm_m else None,
+            "public_commission": round(float(public_m.group(1)) / 100, 4) if public_m else None,
+            "sales_7d": parse_num(sales[1]) if len(sales) > 1 else None,
+            "sales_30d": parse_num(sales[2]) if len(sales) > 2 else None,
+            "shop": shop_m.group(1) if shop_m else None,
+            "merchant_score": float(score_m.group(1)) if score_m else None,
+            "source": "library",
+        })
+    return out
+
+
+def match_ids(rank_products: list[dict], lib_products: list[dict]) -> tuple[list[dict], dict]:
+    """按标题精确匹配，给榜单商品补 product_id。"""
+    by_title = {}
+    for p in lib_products:
+        by_title.setdefault(p["title"].strip(), p)
+    matched = 0
+    for r in rank_products:
+        lib = by_title.get(r["title"].strip())
+        if lib:
+            r["product_id"] = lib["product_id"]
+            r["product_url"] = lib["product_url"]
+            r["merchant_score"] = lib.get("merchant_score")
+            matched += 1
+        else:
+            r["product_id"] = None
+            r["product_url"] = None
+    rate = round(matched / (len(rank_products) or 1), 3)
+    return rank_products, {"matched": matched, "total": len(rank_products), "rate": rate}
+
+
 def coverage(rows: list[dict], fields: list[str]) -> dict:
     n = len(rows) or 1
     return {f: round(sum(1 for r in rows if r.get(f) not in (None, "", [])) / n, 3) for f in fields}
@@ -144,6 +201,7 @@ def main() -> int:
     files = {
         "author": next(dom_dir.glob("*clip-author*.dom.html"), None),
         "product": next(dom_dir.glob("*clip-product*.dom.html"), None),
+        "library": next(dom_dir.glob("*library*.dom.html"), None) or next(dom_dir.glob("custom0.dom.html"), None),
     }
     meta = {"parsed_at": datetime.now(timezone.utc).isoformat(), "sources": {}, "coverage": {}}
     total = 0
@@ -152,15 +210,25 @@ def main() -> int:
             print(f"[skip] 找不到 {kind} 的 DOM")
             continue
         html = f.read_text(encoding="utf-8", errors="replace")
-        rows = parse_author_dom(html) if kind == "author" else parse_product_dom(html)
-        dst = out_dir / f"{kind}s.jsonl"
+        if kind == "author":
+            rows = parse_author_dom(html)
+        elif kind == "product":
+            rows = parse_product_dom(html)
+        else:
+            rows = parse_library_dom(html)
+        dst = out_dir / (f"{kind}s.jsonl" if kind != "library" else "library_products.jsonl")
         with dst.open("w", encoding="utf-8") as fh:
             for r in rows:
                 fh.write(json.dumps(r, ensure_ascii=False) + "\n")
-        fields = (["name", "douyin_id", "followers", "settle_amount", "video_sales",
-                   "aov", "active_products", "sale_videos"] if kind == "author"
-                  else ["title", "price", "commission_rate", "settle_amount", "sales",
-                        "related_videos", "related_creators", "creator", "shop"])
+        if kind == "author":
+            fields = ["name", "douyin_id", "followers", "settle_amount", "video_sales",
+                      "aov", "active_products", "sale_videos"]
+        elif kind == "product":
+            fields = ["title", "price", "commission_rate", "settle_amount", "sales",
+                      "related_videos", "related_creators", "creator", "shop"]
+        else:
+            fields = ["product_id", "title", "price", "commission_rate", "sales_7d",
+                      "sales_30d", "shop", "merchant_score"]
         cov = coverage(rows, fields)
         meta["sources"][kind] = str(f)
         meta["coverage"][kind] = {"rows": len(rows), "fields": cov}
@@ -169,6 +237,20 @@ def main() -> int:
         for k, v in cov.items():
             flag = "" if v >= 0.99 else "  <-- 缺"
             print(f"     {k:<18} {v:.0%}{flag}")
+
+    # 榜单商品 ↔ 选品库按标题匹配，补 product_id
+    rank_f = out_dir / "products.jsonl"
+    lib_f = out_dir / "library_products.jsonl"
+    if rank_f.exists() and lib_f.exists():
+        rank = [json.loads(x) for x in rank_f.read_text(encoding="utf-8").splitlines() if x.strip()]
+        lib = [json.loads(x) for x in lib_f.read_text(encoding="utf-8").splitlines() if x.strip()]
+        rank, res = match_ids(rank, lib)
+        dst = out_dir / "products_with_id.jsonl"
+        with dst.open("w", encoding="utf-8") as fh:
+            for r in rank:
+                fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+        meta["match"] = res
+        print(f"[match] 榜单商品补 ID: {res['matched']}/{res['total']} ({res['rate']:.0%}) -> {dst}")
 
     (out_dir / "_meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"[done] 共 {total} 行，元数据 {out_dir / '_meta.json'}")
