@@ -31,7 +31,7 @@ Write-Host "module: $Module"
 Write-Host "out   : $out"
 
 # Windows 路径要转成容器内路径
-$cmd = "docker run --rm -v `"$h2`":/app -v `"$out`":/out -w /app $Image python " + ($inner -join ' ')
+$cmd = "docker run --rm -e PYTHONDONTWRITEBYTECODE=1 -v `"$h2`":/app -v `"$out`":/out -w /app $Image python " + ($inner -join ' ')
 Write-Host "run   : $cmd"
 & cmd /c $cmd
 $code = $LASTEXITCODE
