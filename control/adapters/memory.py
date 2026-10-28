@@ -70,10 +70,11 @@ def remember(project: str, run_id: str, summary: str, meta: dict | None = None) 
 def recall(project: str, query: str, top_k: int = 5) -> dict:
     backend = _backend()
     if backend == "openviking":
+        # 首次检索会触发 embedding 模型加载（几十秒），超时给足
         status, body = _post(f"{OV_URL}/api/v1/search/search", {
             "query": query,
             "limit": max(top_k * 4, 8),
-        })
+        }, timeout=180)
         raw = ((body.get("result") or {}).get("memories") or []) if isinstance(body, dict) else []
         # 服务端把 ~ 解析成 viking://user/<user>/...，所以按路径里的项目段过滤
         marker = f"/evolution/{project}/"
@@ -82,7 +83,9 @@ def recall(project: str, query: str, top_k: int = 5) -> dict:
                 for h in raw if marker in str(h.get("uri", ""))]
         return {"backend": "openviking", "ok": 200 <= status < 300, "status": status,
                 "hits": hits[:top_k], "scanned": len(raw),
-                "detail": None if status < 300 else str(body)[:200]}
+                "detail": None if status < 300 else str(body)[:200],
+                "error": (body.get("error") if isinstance(body, dict) else None)
+                          if status == 0 else None}
     if not LOCAL_FILE.exists():
         return {"backend": "local", "ok": True, "hits": [], "note": "记忆库为空", "project": project}
     rows = []

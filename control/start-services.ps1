@@ -75,17 +75,27 @@ if ($SkipEmbedding) {
                 ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
             Start-Sleep -Seconds 2
         }
-        Write-Host '[start] embedding'
-        $env:HF_ENDPOINT = 'https://hf-mirror.com'
-        $env:EMBED_MODEL = [string]$cfg['embedding.model']
-        $env:TMP = "$work\_tmp"; $env:TEMP = "$work\_tmp"
+        Write-Host '[start] embedding（计划任务 DSH-Embedding）'
         New-Item -ItemType Directory -Force -Path "$work\_tmp" | Out-Null
-        Start-Process -FilePath $py `
-            -ArgumentList @("$stack\control\adapters\embeddings_server.py", '--port', "$embPort") `
-            -WindowStyle Hidden -RedirectStandardOutput "$work\_tmp\emb.log" -RedirectStandardError "$work\_tmp\emb.err.log"
+        $srv = "$stack\control\adapters\embeddings_server.py"
+        $tr  = '"' + $py + '" "' + $srv + '" --port ' + $embPort
+        $exists = (schtasks /query /tn DSH-Embedding 2>$null)
+        if ($LASTEXITCODE -ne 0) {
+            schtasks /create /tn DSH-Embedding /tr $tr /sc once /st 00:00 /f | Out-Null
+        }
+        schtasks /run /tn DSH-Embedding | Out-Null
         for ($i = 0; $i -lt 15; $i++) {
             Start-Sleep -Seconds 2
-            if (Test-Url "http://127.0.0.1:$embPort/health") { Write-Host '[ok] embedding UP'; break }
+            if (Test-Url "http://127.0.0.1:$embPort/health") {
+                Write-Host '[ok] embedding UP'
+                # 预热：加载模型，避免第一次真实查询超时
+                try {
+                    Invoke-WebRequest -Uri "http://127.0.0.1:$embPort/v1/embeddings" -Method POST -TimeoutSec 180 -UseBasicParsing `
+                        -ContentType 'application/json' -Body '{"input":["warmup"],"model":"bge-small-zh-v1.5"}' | Out-Null
+                    Write-Host '[ok] embedding 已预热'
+                } catch { Write-Host '[warn] 预热失败（首次查询可能较慢）' }
+                break
+            }
         }
     }
 }
