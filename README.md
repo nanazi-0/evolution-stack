@@ -362,3 +362,32 @@ docker compose -p evolution-stack -f control\compose\phoenix.yml up -d
 | 环境变量 | — | `PHOENIX_HOST=http://127.0.0.1:16006` |
 
 `Portfolio` 用它的 6006/4317，互不干扰。telemetry 与 phoenix 两道门禁已在 16006 上验证通过。
+### 服务启停参数（control\start-services.ps1）
+
+```powershell
+.\start-services.ps1                    # 补齐缺的；已在跑的不动
+.\start-services.ps1 -Status            # 只看状态
+.\start-services.ps1 -Restart           # 两个都强制重启
+.\start-services.ps1 -RestartEmbedding  # 只重启 embedding
+.\start-services.ps1 -SkipEmbedding     # 只处理 OpenViking
+```
+
+配置在 `control\services.toml`：
+
+```toml
+[embedding]
+port = 18080
+model = "BAAI/bge-small-zh-v1.5"
+autostart = true        # false = 完全手动
+restart_always = false  # true = 每次都重启
+
+[openviking]
+port = 1933
+container = "ov-evolution"
+autostart = true
+restart_always = false
+```
+
+**默认不重启已在运行的服务**（避免打断已建好的向量索引），需要时才加 `-Restart*`。
+注意：在捕获输出的环境（IDE、脚本管道）里启动长驻进程会让父进程一直等，
+所以这个脚本适合在**普通终端**里跑。

@@ -1,0 +1,19 @@
+# evolution-stack 本地服务配置
+# start-services.ps1 读这个文件；命令行参数可以覆盖。
+
+[embedding]
+# OpenAI 兼容 embedding 服务（OpenViking 必需）
+port = 18080
+model = "BAAI/bge-small-zh-v1.5"
+# true = 没在跑就启动；false = 完全不碰（需手动起）
+autostart = true
+# true = 每次运行脚本都重启；false = 只有在跑才重启（默认，避免打断已建索引）
+restart_always = false
+
+[openviking]
+port = 1933
+container = "ov-evolution"
+image = "openviking-cn-beijing.cr.volces.com/volcengine/openviking:latest"
+autostart = true
+# 重启会重建容器；数据在 work/_openviking 卷里，不会丢
+restart_always = false
