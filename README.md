@@ -256,3 +256,41 @@ QUALITY_GATE=PASS
 * **唯一需要协调的是长期服务容器**：`observability-phoenix-1` 固定占用 4317/6006。
   如果 Portfolio 也要起 Phoenix，两边会抢端口。到时候用独立 compose 项目名 + 改端口：
   `docker compose -p evolution-stack up -d`，并用 `PHOENIX_HOST` 指到新端口。
+### 完整闭环已跑通（2026-10-28）
+
+```
+evolve_run(project, candidates=k, propose_mode, engine)
+  ├─ 评估基线            → baseline_score
+  ├─ 提议 k 个变体        → proposer.py（echo 确定性 / llm 调 DeepSeek）
+  ├─ 逐个探测             → 每个变体跑同一套用例
+  ├─ 选冠军               → champion（含 delta）
+  └─ status = eligible    ← ADR-002：绝不自动晋升
+
+gate_status / gate_run    → 十道门禁（后台跑，不阻塞）
+approve_release(actor)    → 门禁全过 + 具名 → 固化冠军到 releases/<run_id>
+                            + 更新 targets/<project>/current.json
+memory_commit             → 仅 approved 才写
+audit_verify              → SHA-256 链
+```
+
+实测（echo 引擎，零成本）：
+
+| 步骤 | 结果 |
+|---|---|
+| 基线 | score 0.0 |
+| v1（加 SOURCE 标记） | **1.0，delta +1.0** |
+| v2（另一处改动） | 0.0 |
+| champion | v1 |
+| approve 后 | `releases/<run_id>` + `current.json` 落盘 |
+
+关键设计：`gate_status` 不再阻塞——门禁报告有缓存（15 分钟），
+重跑走 `gate_run` 后台任务，用 `gate_status` 轮询。之前同步跑会 4-5 分钟超时。
+
+### 候选与发布目录
+
+```
+targets/<project>/
+├─ baseline/            基线（只读，不由进化改写）
+├─ releases/<run_id>/   已批准的冠军快照
+└─ current.json        当前发布的指针（含 previous，可回滚）
+```
