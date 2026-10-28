@@ -373,14 +373,38 @@ def t_approve(args: dict) -> dict:
 
 def t_rollback(args: dict) -> dict:
     actor = str(args.get("actor", "")).strip() or "unknown"
+    project = str(args.get("project") or PROJECT_DEFAULT)
     state = _load()
-    run = latest_run(state, str(args.get("project") or PROJECT_DEFAULT))
-    if run is None:
-        return {"error": "没有可回滚的 run"}
-    run["status"] = "rolled_back"
-    _audit(state, "release.rollback", {"run_id": run["run_id"], "actor": actor})
+    cur_path = CANDIDATES_ROOT / project / "current.json"
+    if not cur_path.exists():
+        return {"error": f"项目 {project} 没有发布指针，无法回滚"}
+    try:
+        cur = json.loads(cur_path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"current.json 损坏: {exc}"}
+    prev = cur.get("previous")
+    if not prev:
+        return {"error": "没有上一版可回滚（previous 为空）", "current": cur.get("run_id")}
+    prev_dir = CANDIDATES_ROOT / project / "releases" / prev
+    if not prev_dir.is_dir():
+        return {"error": f"上一版 {prev} 的目录不存在", "current": cur.get("run_id")}
+
+    # 真正把指针移回去：current -> prev，并把 prev 的 previous 记录成刚被回滚的版本
+    prev_meta_path = prev_dir.parent.parent / "releases" / prev / "release.json"
+    cur_after = {"run_id": prev, "path": str(prev_dir),
+                 "previous": None,   # 回滚是单向的：再想前进要重新批准
+                 "approved_by": cur.get("approved_by"),
+                 "rolled_back_by": actor, "rolled_back_at": int(time.time())}
+    cur_path.write_text(json.dumps(cur_after, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    run = _find(state, str(cur.get("run_id") or "")) or latest_run(state, project)
+    if run is not None:
+        run["status"] = "rolled_back"
+    _audit(state, "release.rollback", {"from": cur.get("run_id"), "to": prev, "actor": actor,
+                                       "project": project})
     _save(state)
-    return {"run_id": run["run_id"], "status": "rolled_back"}
+    return {"project": project, "from": cur.get("run_id"), "to": prev,
+            "status": "rolled_back", "path": str(prev_dir)}
 
 
 def t_audit_verify(args: dict) -> dict:

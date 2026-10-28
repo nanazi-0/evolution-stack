@@ -424,3 +424,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File control\check-isolation.ps1
 ours : 1933 OpenViking / 18080 embedding / 16006 Phoenix UI / 14317 OTLP
 yours: 6006 / 4317 留空给 Portfolio
 ```
+### 回滚（2026-10-28 修）
+
+之前 `rollback_release` 只把 run 状态改成 `rolled_back`，**没有动 `current.json`** —— 是假回滚。
+现在会真正把发布指针移回上一版：
+
+```
+current.json: {run_id: r2, previous: r1}
+rollback -> {from: r2, to: r1, path: releases/r1}   指针真的回去了
+rollback -> {"error": "没有上一版可回滚（previous 为空）"}   单向，不能靠回滚"前进"
+```
+
+回滚后 `previous` 置空，想前进必须重新批准一个 run —— 防止把旧版"回滚"成新版。
