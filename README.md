@@ -473,3 +473,22 @@ Harness² 的两个硬限制：
 
 要把它作为真正的进化驱动，需要实现它的 `BenchmarkAdapter` 协议（`harness2/core/spec.py`），
 并接入 `claude_cli` / `opencode` 通道——工作量相当于一个独立子项目，目前只做到"可调用 + 已验证"。
+### 磁盘落点（2026-10-28 核查：全部在 D 盘）
+
+| 项目 | 位置 |
+|---|---|
+| DSH 数据目录 | `C:\Users\31755\.dsh` → **联接**到 `D:\start\ds-harness\data\home` |
+| Python 3.14 | `D:\cpython3.14` |
+| Docker 数据（WSL2 vhdx） | `D:\dev-data\docker-desktop\DockerDesktopWSL` |
+| fastembed 模型缓存 | `D:\start\ds-harness\work\_tmp\fastembed_cache` |
+| npm 缓存 | `D:\start\ds-harness\work\.npm-cache` |
+| Playwright 浏览器 | `D:\start\ds-harness\work\_pw-browsers` |
+| OpenViking 数据 | `D:\start\ds-harness\work\_openviking` |
+| 进化状态 / 提案 / 发布 | `D:\start\ds-harness\work\evolution-state`、`targets/<project>/` |
+| 四项目代码 | `D:\start\ds-harness\evolution-stack` |
+
+修过一处泄漏：计划任务启动 embedding 时没有 `TMP`，fastembed 把模型下到了
+`C:\Users\31755\AppData\Local\Temp\fastembed_cache`（90 MB）。已设置用户级
+`FASTEMBED_CACHE_PATH` 与 `HF_HOME` 指向 D 盘，并删掉 C 盘那份。
+
+自检脚本第 7 项会复验这三点：关键目录都在 D、`.dsh` 是联接、C 盘 Temp 没有模型缓存。

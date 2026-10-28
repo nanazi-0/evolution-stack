@@ -68,6 +68,26 @@ $pinned = Select-String -Path "$stack\local\agent-quality-security\scripts\run_e
 $cnt = ($pinned.Matches | Measure-Object).Count
 Check '五个镜像都按 digest 引用' ($cnt -ge 5) "只找到 $cnt 处"
 
+Write-Host '== 7. 数据落点都在 D 盘 =='
+$mustBeD = @(
+    'D:\cpython3.14',
+    'D:\dev-data\docker-desktop',
+    'D:\start\ds-harness\work\_tmp\fastembed_cache',
+    'D:\start\ds-harness\work\_pw-browsers',
+    'D:\start\ds-harness\work\_openviking',
+    'D:\start\ds-harness\work\evolution-state',
+    'D:\start\ds-harness\evolution-stack'
+)
+$notD = @($mustBeD | Where-Object { -not (Test-Path $_) })
+Check '关键数据都在 D 盘且存在' ($notD.Count -eq 0) ($notD -join '; ')
+
+$dsh = Get-Item "$env:USERPROFILE\.dsh" -Force -ErrorAction SilentlyContinue
+$isJunction = $dsh -and ($dsh.Attributes -band [IO.FileAttributes]::ReparsePoint)
+Check '.dsh 是指向 D 盘的联接' ([bool]$isJunction) "当前不是联接"
+
+$cTemp = Test-Path "$env:LOCALAPPDATA\Temp\fastembed_cache"
+Check 'C 盘 Temp 没有模型缓存' (-not $cTemp) "发现 $env:LOCALAPPDATA\Temp\fastembed_cache"
+
 Write-Host ''
 if ($fails -eq 0) {
     Write-Host 'ISOLATION=PASS  与 Portfolio 无共享的可变状态'
