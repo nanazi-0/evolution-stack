@@ -304,3 +304,18 @@ delta=0 -> "ADR-002：冠军 v1 相对基线没有实质改进（delta=0.0），
 ```
 
 这条堵的是"批准一个没变好的版本"。实测两种情形都验证过。
+### 评测用例的优先级
+
+```
+evolve_run(cases="...")            优先级最高
+targets/<project>/cases.json       项目自带
+EVOLUTION_CASES 环境变量
+control/eval/cases/smoke.json      默认
+```
+
+每个项目可以有自己的用例集，互不影响。验收一条命令：
+
+```
+evolve_run(project="x", candidates=1, engine="echo", cases=".../cases/ppc.json")
+  -> baseline 0.0 / champion delta +1.0 -> approve -> releases/<run_id>
+```

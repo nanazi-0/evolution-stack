@@ -49,13 +49,25 @@ def candidate_for(project: str) -> Path:
     return cand if cand.is_dir() else CANDIDATE_DIR
 
 
+def cases_for(project: str, override: str | None = None) -> Path:
+    """用例优先级：显式参数 > 项目自带 cases.json > 环境变量 > 默认。"""
+    if override:
+        p = Path(override)
+        return p if p.exists() else CASES_FILE
+    proj = CANDIDATES_ROOT / project / "cases.json"
+    if proj.exists():
+        return proj
+    return CASES_FILE
+
+
 def latest_run(state: dict, project: str | None = None):
     """只在指定项目内取最新 run，避免跨项目误批。"""
     runs = [r for r in state["runs"] if project is None or r.get("project", "default") == project]
     return runs[-1] if runs else None
 
 
-def run_evaluation(engine_name: str | None = None, candidate: Path | None = None) -> dict:
+def run_evaluation(engine_name: str | None = None, candidate: Path | None = None,
+                   cases: Path | None = None) -> dict:
     """调用执行器适配器拿一份信封（ADR-006：只有 DSH 或离线引擎，禁止外部 substrate）。
 
     engine_name: "echo"（默认，秒回零成本）或 "dsh"（真模型，每条用例约 1-2 分钟）。
@@ -77,7 +89,7 @@ def run_evaluation(engine_name: str | None = None, candidate: Path | None = None
         engine = EchoEngine()
     else:
         raise ValueError(f"未知引擎 {name}，只允许 echo / dsh")
-    return run_eval(candidate or CANDIDATE_DIR, CASES_FILE, engine, DSH_TIMEOUT)
+    return run_eval(candidate or CANDIDATE_DIR, cases or CASES_FILE, engine, DSH_TIMEOUT)
 
 LEVELS = {  # ADR-005 预算分级
     "l1": {"candidates": 1, "tasks": 5, "gates": 3},
@@ -145,8 +157,9 @@ def t_evolve_run(args: dict) -> dict:
     if engine_name not in ("echo", "dsh"):
         return {"error": f"未知引擎 {engine_name}，只允许 echo / dsh"}
     baseline_dir = candidate_for(project)
+    cases_path = cases_for(project, args.get("cases"))
     try:
-        evaluation = run_evaluation(engine_name, baseline_dir)
+        evaluation = run_evaluation(engine_name, baseline_dir, cases_path)
     except Exception as exc:                      # 评估失败不能静默变通过
         evaluation = {"passed": False, "score": 0.0, "metrics": {},
                       "failures": [{"id": "evaluator-error", "detail": f"{type(exc).__name__}: {exc}"}]}
@@ -185,7 +198,7 @@ def t_evolve_run(args: dict) -> dict:
                 cands.append({"id": v["id"], "status": "rejected", "reason": v["rejected"]})
                 continue
             try:
-                env_v = run_evaluation(engine_name, Path(v["path"]))
+                env_v = run_evaluation(engine_name, Path(v["path"]), cases_path)
                 score = float((env_v.get("metrics") or {}).get("task_success") or 0.0)
                 cands.append({"id": v["id"], "status": "probed", "score": score,
                               "path": v["path"],
@@ -422,6 +435,7 @@ TOOLS = [
      {"type": "object", "properties": {"level": {"type": "string"}, "objective": {"type": "string"},
                                        "project": {"type": "string"},
                                        "candidates": {"type": "integer"},
+                                       "cases": {"type": "string"},
                                        "propose_mode": {"type": "string", "enum": ["echo", "llm"]},
                                        "max_generations": {"type": "integer"},
                                        "engine": {"type": "string", "enum": ["echo", "dsh"]}}}),
