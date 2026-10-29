@@ -1,0 +1,34 @@
+# 直播切片分析链路（示例）：演示"按能力选模型"，不写死模型名。
+
+[lane]
+name = "clip-analysis"
+project = "clip"
+budget_yuan = 1.0
+description = "读打分结果 → 让模型给出选品建议"
+
+[[step]]
+id = "score"
+kind = "script"
+run = "adapters/clip_score.py"
+args = ["--top", "10"]
+timeout_s = 300
+
+[[step]]
+id = "advice"
+kind = "llm"
+requires = ["text.reason"]        # 只要"能推理"，具体用哪个模型由注册表决定
+system = "你是抖音电商选品顾问，回答必须给出依据，不要编造数字。"
+prompt = """
+下面是按"持续赚钱"模型排出的前 10 个商品（已过佣金/体验分/销量门槛）。
+请指出：如果只能选 3 个做直播切片，应该选哪 3 个、为什么，以及各自的主要风险。
+
+（数据见 targets/clip/data/clip_top.csv 已生成；此处仅依据标题与分数做定性判断）
+"""
+timeout_s = 120
+input_file = "../local/agent-evolution-platform/targets/clip/data/clip_top.csv"
+input_max_lines = 11
+
+[[step]]
+id = "review"
+kind = "human"
+prompt = "看 advice.md，确认建议是否合理"

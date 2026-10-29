@@ -1,0 +1,95 @@
+# 工作流层（声明式链路）
+
+加一条业务链路 = **写一个 TOML**，不改代码。
+
+```
+control/workflow/
+├─ runner.py            通用执行器（脚本 / LLM / 人工三类步骤）
+├─ models.toml          模型注册表（能力 → 具体模型）
+├─ lanes/
+│  ├─ clip-refresh.toml     刷新商品池 → 打分 → 人工复核
+│  └─ clip-analysis.toml    打分 → 模型给建议 → 人工复核
+└─ README.md            本文件
+```
+
+## 快速开始
+
+```powershell
+cd control\workflow
+
+python runner.py --list                          # 列出所有链路
+python runner.py --lane lanes\clip-refresh.toml --dry-run   # 看步骤，不执行
+python runner.py --lane lanes\clip-refresh.toml             # 真跑
+python runner.py --lane lanes\clip-refresh.toml --approve <run_id>   # 人工步骤放行
+python runner.py --lane lanes\clip-refresh.toml --resume <run_id>    # 断点续跑
+```
+
+运行状态：`work\_workflows\<run_id>\state.json`
+
+## 链路定义
+
+```toml
+[lane]
+name = "clip-refresh"
+project = "clip"          # 对应项目隔离
+budget_yuan = 2.0         # LLM 步骤累计预算，超了直接中止
+description = "..."
+
+[[step]]
+id = "rebuild_pool"
+kind = "script"
+run = "adapters/rebuild_pool.py"    # 相对 control/ 的路径
+args = ["--flag"]
+timeout_s = 300
+retries = 1
+
+[[step]]
+id = "advice"
+kind = "llm"
+requires = ["text.reason"]          # 只要能力，不写死模型
+model = "glm-4.6"                   # 可选：显式指定
+system = "..."
+prompt = "..."
+input_file = "../local/.../clip_top.csv"   # 可选：把文件内容注入提示词
+input_max_lines = 11                        # 可选：只取前 N 行
+timeout_s = 120
+
+[[step]]
+id = "review"
+kind = "human"
+prompt = "看生成结果，确认是否合理"
+```
+
+## 三类步骤
+
+| kind | 做什么 | 失败行为 |
+|---|---|---|
+| `script` | 跑确定性脚本，带超时与重试 | 重试后仍失败 → run 中止 |
+| `llm` | 按 `requires` 解析模型并调用，累计预算 | 缺 key / 预算超 / 模型未核实 → **fail-closed** |
+| `human` | 暂停，状态置 `awaiting_human` | 等人 `--approve`，不算失败 |
+
+## 模型路由规则（models.toml）
+
+1. `requires` 是**能力**（`text.reason` / `text.fast` / `json.mode` / `embedding`），不是模型名
+2. **`verified_at` 为空的模型不会被选用**——型号和价格没核实过，不能拿来算预算
+3. 没写 `cost_in_per_1k` / `cost_out_per_1k` 的模型：能调用，但**不计费**（`cost_yuan` 为 null）
+
+> 当前 `deepseek-flash` 已验证可用但未配置价格，所以预算对它不生效。
+> 要真正卡预算，先把价格核实并填进 `models.toml`。
+
+## 已验证的能力（2026-10-29）
+
+```
+clip-refresh    3 步：脚本 10.0s + 0.2s，人工暂停 → approve 后续跑完成 ✅
+clip-analysis   3 步：脚本 0.2s + deepseek-flash 39.3s（127→1114 tokens）
+                输出 854 字，基于 CSV 真实数据点名 3 个商品并给依据 ✅
+```
+
+## 与 DSH 的分工
+
+| 层 | 负责 | 位置 |
+|---|---|---|
+| 流程定义 | 谁调用谁、用什么能力、预算多少 | `lanes/*.toml` |
+| 执行 | 重试、超时、预算、状态持久化、断点 | `runner.py` |
+| 节点能力 | 需要判断的交给模型；确定性的交给脚本 | `models.toml` + `adapters/` |
+| 长期运行 | 定时触发 | Windows 计划任务 |

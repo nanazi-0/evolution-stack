@@ -1,0 +1,29 @@
+# 直播切片链路（示例）：只写"谁调用谁、用什么能力、超时多少"，不写代码。
+
+[lane]
+name = "clip-refresh"
+project = "clip"
+budget_yuan = 2.0            # 本次运行最多花多少（llm 步骤累计）
+description = "刷新商品池 → 重新打分 → 人工复核"
+
+# 步骤 1：重建结构化池（确定性脚本，不用模型）
+[[step]]
+id = "rebuild_pool"
+kind = "script"
+run = "adapters/rebuild_pool.py"
+timeout_s = 300
+retries = 1
+
+# 步骤 2：规则打分（确定性脚本）
+[[step]]
+id = "score"
+kind = "script"
+run = "adapters/clip_score.py"
+args = ["--top", "20", "--csv"]
+timeout_s = 300
+
+# 步骤 3：人工复核（跑完就停，等人批准）
+[[step]]
+id = "review"
+kind = "human"
+prompt = "看 clip_top.csv，确认名单是否合理"

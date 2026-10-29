@@ -1,0 +1,39 @@
+# 模型注册表：链路的步骤只声明"需要什么能力"，由 runner 在这里解析具体模型。
+#
+# 规则：
+#   1. verified_at 为空的模型，runner 拒绝调用（价格/型号没核实过，不能用来算预算）
+#   2. capabilities 是抽象能力，链路不写死模型名
+#   3. 未写 cost_* 表示价格未核实；预算计算会跳过该模型并记录
+
+[models.glm-4-flash]
+provider    = "zhipu"
+endpoint    = "https://open.bigmodel.cn/api/paas/v4"
+model       = "glm-4-flash"
+key_env     = "ZHIPU_API_KEY"
+capabilities = ["text.fast", "json.mode"]
+context      = 128000
+verified_at  = ""              # 待核实
+[models.glm-4.6]
+provider    = "zhipu"
+endpoint    = "https://open.bigmodel.cn/api/paas/v4"
+model       = "glm-4.6"
+key_env     = "ZHIPU_API_KEY"
+capabilities = ["text.reason", "text.long", "json.mode"]
+context      = 200000
+verified_at  = ""
+[models.deepseek-flash]
+provider    = "deepseek"
+endpoint    = "https://api.deepseek.com/v1"
+model       = "deepseek-flash"
+key_env     = "DEEPSEEK_API_KEY"
+capabilities = ["text.fast", "text.reason", "json.mode"]
+context      = 128000
+verified_at  = "2026-10-29"
+[models.bge-zh]
+provider    = "local"
+endpoint    = "http://127.0.0.1:18080/v1"
+model       = "BAAI/bge-small-zh-v1.5"
+key_env     = ""
+capabilities = ["embedding"]
+dimension   = 512
+verified_at  = "2026-10-29"
