@@ -244,14 +244,27 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=3)
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--ids", nargs="*", help="指定 product_id")
+    ap.add_argument("--ids-file", default=None, help="从 product_ids.json 读取")
+    ap.add_argument("--resume-from", default=None, help="跳过该目录里已采集的 page_id")
     ap.add_argument("--delay", type=float, default=2.0)
     args = ap.parse_args()
 
     rows = [json.loads(x) for x in (DATA / "library_all.jsonl").read_text(encoding="utf-8").splitlines() if x.strip()]
+    if args.ids_file:
+        ids_map = json.loads(Path(args.ids_file).read_text(encoding="utf-8")).get("ids", {})
+        known = {r["product_id"]: r for r in rows}
+        rows = [known.get(pid) or {"product_id": pid,
+                                   "product_url": f"https://www.chanxuan.com/goods/{pid}.html",
+                                   "title": ""} for pid in ids_map]
     if args.ids:
         want = set(args.ids)
         rows = [r for r in rows if r["product_id"] in want]
-    elif not args.all:
+    if args.resume_from:
+        done = {f.stem for f in Path(args.resume_from, "items").glob("*.json")}
+        before = len(rows)
+        rows = [r for r in rows if r["product_id"] not in done]
+        print(f"[resume] 已有 {len(done)} 个，待采 {len(rows)}（总 {before}）", flush=True)
+    if not args.ids_file and not args.ids and not args.all and not args.resume_from:
         rows = rows[: args.limit]
 
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
