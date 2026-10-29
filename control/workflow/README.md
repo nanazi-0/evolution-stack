@@ -93,3 +93,42 @@ clip-analysis   3 步：脚本 0.2s + deepseek-flash 39.3s（127→1114 tokens�
 | 执行 | 重试、超时、预算、状态持久化、断点 | `runner.py` |
 | 节点能力 | 需要判断的交给模型；确定性的交给脚本 | `models.toml` + `adapters/` |
 | 长期运行 | 定时触发 | Windows 计划任务 |
+
+---
+
+## 智谱 GLM 接入（2026-10-29 验证）
+
+**调用方式**：不需要装官方 SDK，直接走 OpenAI 兼容 HTTP：
+
+```
+POST https://open.bigmodel.cn/api/paas/v4/chat/completions
+Authorization: Bearer $env:ZHIPU_API_KEY
+```
+
+**Key 配置**：`ZHIPU_API_KEY`（用户级环境变量，runner 按 `key_env` 读取）
+
+**已验证的模型**（实测调用成功）：
+
+| 模型 | 状态 | 价格（元/百万 tokens） |
+|---|---|---|
+| `glm-5.3` | ✅ 旗舰，思考模式 | 输入 8 / 输出 28（已填入注册表，可计费） |
+| `glm-4.6` | ✅ 可用 | 价格页未列，未填 |
+| `glm-4-flash` | ✅ 可用 | 未核实 |
+| `glm-4.7-flash` | ⚠️ 免费但常返回 `1305 访问量过大` | 0 |
+
+**实测账目**（clip-analysis 链路，注入 10 行 CSV）：
+
+```
+model     = glm-5.3
+tokens    = 11079
+cost_yuan = 0.2858      ← 按 8/28 元每百万算出来的
+chars     = 2063
+耗时      = 110.5s
+```
+
+## 踩到的两个坑
+
+1. **TOML 的 `.` 是嵌套分隔符**：`[models.glm-5.3]` 会被解析成 `models.glm-5."3"`。
+   必须写成 `[models."glm-5.3"]`。
+2. **思考模型很慢**：`glm-5.3` 不带 `max_tokens` 时会超过 120 秒超时。
+   链路里要显式写 `max_tokens`（示例用 900）和 `timeout_s = 300`。

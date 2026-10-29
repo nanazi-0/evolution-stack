@@ -1,27 +1,55 @@
-# 模型注册表：链路的步骤只声明"需要什么能力"，由 runner 在这里解析具体模型。
+# 模型注册表：链路只声明能力，具体模型由这里解析。
 #
 # 规则：
-#   1. verified_at 为空的模型，runner 拒绝调用（价格/型号没核实过，不能用来算预算）
-#   2. capabilities 是抽象能力，链路不写死模型名
-#   3. 未写 cost_* 表示价格未核实；预算计算会跳过该模型并记录
+#   1. verified_at 为空 → runner 拒绝调用（型号/价格没核实过，不能用来算预算）
+#   2. 未写 cost_in_per_1k / cost_out_per_1k → 能调用但不计费（cost_yuan 为 null）
+#   3. 价格来源：https://bigmodel.cn/pricing（2026-10-29 核对，元/百万 tokens ÷ 1000 = 元/千 tokens）
 
-[models.glm-4-flash]
+[models."glm-5.3"]
 provider    = "zhipu"
 endpoint    = "https://open.bigmodel.cn/api/paas/v4"
-model       = "glm-4-flash"
+model       = "glm-5.3"
 key_env     = "ZHIPU_API_KEY"
-capabilities = ["text.fast", "json.mode"]
-context      = 128000
-verified_at  = ""              # 待核实
-[models.glm-4.6]
+capabilities = ["text.reason", "text.long", "json.mode"]
+context      = 1000000
+verified_at  = "2026-10-29"
+verified_from = "https://bigmodel.cn/pricing"
+cost_in_per_1k  = 0.008     # 8 元/M
+cost_out_per_1k = 0.028     # 28 元/M
+
+[models."glm-4.6"]
 provider    = "zhipu"
 endpoint    = "https://open.bigmodel.cn/api/paas/v4"
 model       = "glm-4.6"
 key_env     = "ZHIPU_API_KEY"
 capabilities = ["text.reason", "text.long", "json.mode"]
 context      = 200000
-verified_at  = ""
-[models.deepseek-flash]
+verified_at  = "2026-10-29"      # 实测可用；价格页未列此型号，未填价格
+verified_from = "实测调用成功"
+
+[models."glm-4-flash"]
+provider    = "zhipu"
+endpoint    = "https://open.bigmodel.cn/api/paas/v4"
+model       = "glm-4-flash"
+key_env     = "ZHIPU_API_KEY"
+capabilities = ["text.fast", "json.mode"]
+context      = 128000
+verified_at  = "2026-10-29"      # 实测可用；价格未核实
+
+[models."glm-4.7-flash"]
+provider    = "zhipu"
+endpoint    = "https://open.bigmodel.cn/api/paas/v4"
+model       = "glm-4.7-flash"
+key_env     = "ZHIPU_API_KEY"
+capabilities = ["text.fast", "text.reason", "json.mode"]
+context      = 200000
+verified_at  = "2026-10-29"
+verified_from = "https://bigmodel.cn/pricing（免费模型）"
+cost_in_per_1k  = 0.0
+cost_out_per_1k = 0.0
+note        = "免费但常因访问量过大返回 1305，需要重试"
+
+[models."deepseek-flash"]
 provider    = "deepseek"
 endpoint    = "https://api.deepseek.com/v1"
 model       = "deepseek-flash"
@@ -29,7 +57,8 @@ key_env     = "DEEPSEEK_API_KEY"
 capabilities = ["text.fast", "text.reason", "json.mode"]
 context      = 128000
 verified_at  = "2026-10-29"
-[models.bge-zh]
+
+[models."bge-zh"]
 provider    = "local"
 endpoint    = "http://127.0.0.1:18080/v1"
 model       = "BAAI/bge-small-zh-v1.5"

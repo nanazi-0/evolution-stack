@@ -64,7 +64,7 @@ def resolve_model(models: dict, requires: list[str], explicit: str | None) -> tu
     return None, f"没有模型具备能力 {requires}"
 
 
-def call_llm(spec: dict, messages: list[dict], timeout: int = 120) -> tuple[str, dict]:
+def call_llm(spec: dict, messages: list[dict], timeout: int = 120, max_tokens: int | None = None) -> tuple[str, dict]:
     key_env = spec.get("key_env") or ""
     key = os.environ.get(key_env, "") if key_env else ""
     if key_env and not key:
@@ -142,7 +142,8 @@ def run_llm(step: dict, run_dir: Path, models: dict, state: dict, lane: dict) ->
     if budget and spent >= budget:
         return {"status": "failed", "error": f"预算已用尽 {spent:.2f}/{budget:.2f} 元"}
     try:
-        text, usage = call_llm(spec, messages, int(step.get("timeout_s", 120)))
+        text, usage = call_llm(spec, messages, int(step.get("timeout_s", 120)),
+                               step.get("max_tokens"))
     except Exception as exc:  # noqa: BLE001
         return {"status": "failed", "error": f"{type(exc).__name__}: {exc}"}
     cost = None

@@ -17,6 +17,7 @@ timeout_s = 300
 id = "advice"
 kind = "llm"
 requires = ["text.reason"]        # 只要"能推理"，具体用哪个模型由注册表决定
+model = "glm-5.3"                 # 显式指定智谱旗舰（已核实价格，可计费）
 system = "你是抖音电商选品顾问，回答必须给出依据，不要编造数字。"
 prompt = """
 下面是按"持续赚钱"模型排出的前 10 个商品（已过佣金/体验分/销量门槛）。
@@ -24,7 +25,8 @@ prompt = """
 
 （数据见 targets/clip/data/clip_top.csv 已生成；此处仅依据标题与分数做定性判断）
 """
-timeout_s = 120
+timeout_s = 300
+max_tokens = 900
 input_file = "../local/agent-evolution-platform/targets/clip/data/clip_top.csv"
 input_max_lines = 11
 
