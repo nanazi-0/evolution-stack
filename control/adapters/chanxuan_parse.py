@@ -26,7 +26,7 @@ from bs4 import BeautifulSoup
 DEFAULT_DIR = Path(r"D:\start\ds-harness\work\_scrape\chanxuan-p1")
 OUT_ROOT = Path(r"D:\start\ds-harness\evolution-stack\local\agent-evolution-platform\targets\clip\data")
 
-CN_UNITS = {"w": 10_000, "W": 10_000, "万": 10_000, "亿": 100_000_000, "k": 1_000, "K": 1_000}
+CN_UNITS = {"w": 10_000, "W": 10_000, "万": 10_000, "亿": 100_000_000, "k": 1_000, "K": 1_000, "千": 1_000}
 
 
 def parse_num(text: str):
@@ -37,13 +37,13 @@ def parse_num(text: str):
     if not s or s in {"-", "—", "/"}:
         return None
     # 区间
-    m = re.fullmatch(r"([0-9.]+)([wW万kK亿]?)[-~]([0-9.]+)([wW万kK亿]?)", s)
+    m = re.fullmatch(r"([0-9.]+)([wW万kK亿千]?)[-~]([0-9.]+)([wW万kK亿千]?)", s)
     if m:
         lo_unit = CN_UNITS.get(m.group(2), 1)
         hi_unit = CN_UNITS.get(m.group(4), 1)
         return [float(m.group(1)) * lo_unit, float(m.group(3)) * hi_unit]
     # 单值
-    m = re.fullmatch(r"([0-9.]+)([wW万kK亿]?)\+?", s)
+    m = re.fullmatch(r"([0-9.]+)([wW万kK亿千]?)\+?", s)
     if m:
         return float(m.group(1)) * CN_UNITS.get(m.group(2), 1)
     return None
@@ -140,22 +140,44 @@ def parse_library_dom(html: str) -> list[dict]:
             continue
         title = re.sub(r"\s+", " ", a.get_text(" ", strip=True)).strip()
         txt = re.sub(r"\s+", " ", div.get_text(" ", strip=True))
-        price_m = re.search(r"￥\s*([0-9.]+)", txt)
+
+        # 卡片文本形如：
+        # 标题 [榜单标签] ¥19.90 赚 ￥4.37 50-100人在带 直播 100% 蝉选高佣 22 % 投广佣金 5 %
+        # 公开佣金 5% 5千-1万 昨日 2.5万-5万 7日销量 2.5万-5万 30日销量 奥力给官方旗舰店 综合体验 5
+        RANGE = r"([0-9.]+[万千kK]?[-~][0-9.]+[万千kK]?|[0-9.]+[万千kK]?\+?)"
+
+        def grab(pattern, cast=float, flags=0):
+            m = re.search(pattern, txt, flags)
+            return cast(m.group(1)) if m else None
+
+        price = grab(r"[¥￥]\s*([0-9.]+)")
+        earn = grab(r"赚\s*[¥￥]?\s*([0-9.]+)")
+        creators = parse_num(re.search(r"([0-9.]+[万千kK]?[-~][0-9.]+[万千kK]?|[0-9.]+[万千kK]?)\s*人在带", txt).group(1)) if re.search(r"(?:[0-9.]+[万千kK]?[-~][0-9.]+[万千kK]?|[0-9.]+[万千kK]?)\s*人在带", txt) else None
+        ch_m = re.search(r"(直播|视频|商品卡)\s*([0-9.]+)\s*%", txt)
         comm_m = re.search(r"蝉选高佣\s*([0-9.]+)\s*%", txt)
         public_m = re.search(r"公开佣金\s*([0-9.]+)\s*%", txt)
-        sales = re.findall(r"([0-9.]+[万千kK]?[-~][0-9.]+[万千kK]?|[0-9.]+[万千kK]?\+?)\s*(?:昨日|昨日销量|7日销量|30日销量)", txt)
-        shop_m = re.search(r"([\u4e00-\u9fa5A-Za-z0-9]+官方旗舰店|[\u4e00-\u9fa5A-Za-z0-9]+旗舰店|[\u4e00-\u9fa5]+店)", txt)
+        ad_m = re.search(r"投广佣金\s*([0-9.]+)\s*%", txt)
+        s_y = parse_num(re.search(RANGE + r"\s*昨日", txt).group(1)) if re.search(RANGE + r"\s*昨日", txt) else None
+        s_7 = parse_num(re.search(RANGE + r"\s*7日销量", txt).group(1)) if re.search(RANGE + r"\s*7日销量", txt) else None
+        s_30 = parse_num(re.search(RANGE + r"\s*30日销量", txt).group(1)) if re.search(RANGE + r"\s*30日销量", txt) else None
+        shop_m = re.search(r"30日销量\s*([\u4e00-\u9fa5A-Za-z0-9()（）·\-]+?店)\s*综合体验", txt)
         score_m = re.search(r"综合体验\s*([0-9.]+)", txt)
         out.append({
             "kind": "product",
             "product_id": pid,
             "product_url": f"https://www.chanxuan.com{a.get('href')}",
             "title": title,
-            "price": float(price_m.group(1)) if price_m else None,
+            "price": price,
+            "earn_per_order": earn,
             "commission_rate": round(float(comm_m.group(1)) / 100, 4) if comm_m else None,
             "public_commission": round(float(public_m.group(1)) / 100, 4) if public_m else None,
-            "sales_7d": parse_num(sales[1]) if len(sales) > 1 else None,
-            "sales_30d": parse_num(sales[2]) if len(sales) > 2 else None,
+            "ad_commission": round(float(ad_m.group(1)) / 100, 4) if ad_m else None,
+            "creators_count": creators,
+            "channel": ch_m.group(1) if ch_m else None,
+            "channel_share": round(float(ch_m.group(2)) / 100, 4) if ch_m else None,
+            "sales_yesterday": s_y,
+            "sales_7d": s_7,
+            "sales_30d": s_30,
             "shop": shop_m.group(1) if shop_m else None,
             "merchant_score": float(score_m.group(1)) if score_m else None,
             "source": "library",
