@@ -208,10 +208,13 @@ def capture(page, url: str, raw_dir: Path, item_dir: Path) -> dict:
     raw_file = raw_dir / f"{pid}.html"
     txt_file = raw_dir / f"{pid}.txt"
     detail_file = raw_dir / f"{pid}.detail.txt"
-    raw_file.write_text(html, encoding="utf-8")
-    txt_file.write_text(full_text, encoding="utf-8")
-    detail_file.write_text(detail_text, encoding="utf-8")
-    sha = hashlib.sha256(html.encode("utf-8")).hexdigest()
+    # 关键：必须按字节写入。write_text 在 Windows 会把 \n 翻译成 \r\n，
+    # 导致「文件实际字节」与「计算哈希用的字符串」不一致，证据链就断了。
+    raw_bytes_ = html.encode("utf-8")
+    raw_file.write_bytes(raw_bytes_)
+    txt_file.write_bytes(full_text.encode("utf-8"))
+    detail_file.write_bytes(detail_text.encode("utf-8"))
+    sha = hashlib.sha256(raw_bytes_).hexdigest()
 
     links = page.evaluate(LINKS_JS)
     controls = page.evaluate(CLICKABLE_JS)
